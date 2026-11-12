@@ -1,6 +1,7 @@
 import json
 import os
 import re
+from collections.abc import Callable
 from typing import Any
 
 from dotenv import load_dotenv
@@ -182,16 +183,29 @@ def write_report(topic: str, results: dict[str, Any]) -> str:
     return report
 
 
-def run_research(topic: str) -> dict[str, Any]:
+def run_research(
+    topic: str,
+    progress_callback: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
     if not isinstance(topic, str) or not topic.strip():
         return {
             "report": "## Research not started\n\nPlease enter a non-empty topic.",
             "sources": [],
         }
 
+    if progress_callback:
+        progress_callback("Planning queries...")
     queries = generate_queries(topic)
+
+    if progress_callback:
+        progress_callback("Searching web...")
     results = search_web(queries)
+
+    if progress_callback:
+        progress_callback("Writing report...")
+    report = write_report(topic.strip(), results)
+
     return {
-        "report": write_report(topic.strip(), results),
+        "report": report,
         "sources": results["sources"],
     }

@@ -57,6 +57,33 @@ class AgentTests(unittest.TestCase):
         self.assertIn("[1] Source A", result["text"])
         self.assertEqual(len(result["errors"]), 1)
 
+    def test_run_research_reports_progress_and_preserves_contract(self):
+        progress = []
+        search_results = {
+            "text": "[1] Source A (https://example.com/a)\nUseful text",
+            "sources": [{"title": "Source A", "url": "https://example.com/a"}],
+            "errors": [],
+        }
+
+        with (
+            patch("agent.generate_queries", return_value=["one", "two", "three"]),
+            patch("agent.search_web", return_value=search_results),
+            patch("agent.write_report", return_value="# Report"),
+        ):
+            result = agent.run_research("A research topic", progress.append)
+
+        self.assertEqual(
+            progress,
+            ["Planning queries...", "Searching web...", "Writing report..."],
+        )
+        self.assertEqual(
+            result,
+            {
+                "report": "# Report",
+                "sources": [{"title": "Source A", "url": "https://example.com/a"}],
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
