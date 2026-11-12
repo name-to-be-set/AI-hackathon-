@@ -1,11 +1,12 @@
 import json
+import logging
 import os
 import re
 from collections.abc import Callable
 from typing import Any
 
 from dotenv import load_dotenv
-from openai import OpenAI
+from openai import OpenAI, OpenAIError
 from requests.exceptions import RequestException
 from tavily import (
     BadRequestError,
@@ -19,6 +20,8 @@ from tavily import (
 load_dotenv()
 
 MODEL = "groq/openai/gpt-oss-20b"
+FALLBACK_MODEL = "gemini/gemini-3.6-flash"
+LOGGER = logging.getLogger(__name__)
 SEARCH_ERRORS = (
     BadRequestError,
     InvalidAPIKeyError,
@@ -35,6 +38,29 @@ def _get_llm_client() -> OpenAI:
     if not api_key:
         raise RuntimeError("BIFROST_API_KEY is missing from .env.")
     return OpenAI(api_key=api_key, base_url="http://localhost:8080/v1")
+
+
+def _chat_completion(messages: list[dict[str, str]]) -> Any:
+    client = _get_llm_client()
+    try:
+        return client.chat.completions.create(model=MODEL, messages=messages)
+    except OpenAIError as primary_error:
+        LOGGER.warning(
+            "Bifrost model %s failed; retrying with %s: %s",
+            MODEL,
+            FALLBACK_MODEL,
+            primary_error,
+        )
+        try:
+            return client.chat.completions.create(
+                model=FALLBACK_MODEL,
+                messages=messages,
+            )
+        except OpenAIError as fallback_error:
+            raise RuntimeError(
+                f"Both Bifrost models failed. Primary: {primary_error}; "
+                f"backup: {fallback_error}"
+            ) from fallback_error
 
 
 def _parse_queries(response: str) -> list[str]:
@@ -74,12 +100,12 @@ def _parse_queries(response: str) -> list[str]:
 
 
 def generate_queries(topic: str) -> list[str]:
+    """Generate four focused web-search queries for a research topic."""
     if not isinstance(topic, str) or not topic.strip():
         return []
 
-    response = _get_llm_client().chat.completions.create(
-        model=MODEL,
-        messages=[
+    response = _chat_completion(
+        [
             {
                 "role": "system",
                 "content": (
@@ -89,13 +115,14 @@ def generate_queries(topic: str) -> list[str]:
                 ),
             },
             {"role": "user", "content": topic.strip()},
-        ],
+        ]
     )
     content = response.choices[0].message.content or ""
     return _parse_queries(content)
 
 
 def search_web(queries: list[str]) -> dict[str, Any]:
+    """Search the web, remove duplicate URLs, and number source text."""
     api_key = os.getenv("TAVILY_API_KEY")
     if not api_key:
         raise RuntimeError("TAVILY_API_KEY is missing from .env.")
@@ -143,6 +170,7 @@ def search_web(queries: list[str]) -> dict[str, Any]:
 
 
 def write_report(topic: str, results: dict[str, Any]) -> str:
+    """Write a Markdown report with citations matching the numbered sources."""
     if not results["sources"]:
         report = "## Research could not be completed\n\nNo usable search results were found."
     else:
@@ -150,9 +178,8 @@ def write_report(topic: str, results: dict[str, Any]) -> str:
             f"[{index}] {source['title']} — {source['url']}"
             for index, source in enumerate(results["sources"], start=1)
         )
-        response = _get_llm_client().chat.completions.create(
-            model=MODEL,
-            messages=[
+        response = _chat_completion(
+            [
                 {
                     "role": "system",
                     "content": (
@@ -171,7 +198,7 @@ def write_report(topic: str, results: dict[str, Any]) -> str:
                         f"Available sources:\n{source_list}"
                     ),
                 },
-            ],
+            ]
         )
         report = response.choices[0].message.content or ""
         if not report.strip():
@@ -187,6 +214,7 @@ def run_research(
     topic: str,
     progress_callback: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
+    """Run the research pipeline and return a report with its source links."""
     if not isinstance(topic, str) or not topic.strip():
         return {
             "report": "## Research not started\n\nPlease enter a non-empty topic.",

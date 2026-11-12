@@ -31,3 +31,18 @@ flowchart LR
     A -->|Markdown report and sources| UI
     UI -->|View, open links, download| U
 ```
+
+## Slide 5 — Key features
+
+- Focused, multi-query web research with Tavily.
+- Structured Markdown reports with numbered citations.
+- Clickable source cards and a downloadable report.
+- Live progress, example prompts, and a one-click reset.
+- Bifrost model retry: Groq primary, Gemini backup.
+
+## Slide 6 — Tech stack and future scope
+
+**Tech stack:** Streamlit, Python, Tavily, Bifrost, Groq, and Gemini.
+
+**Future scope:** configurable report depth, export formats, team-level usage
+limits, and additional providers or research sources.

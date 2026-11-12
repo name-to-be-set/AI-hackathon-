@@ -1,7 +1,9 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import agent
+from openai import OpenAIError
 
 
 class AgentTests(unittest.TestCase):
@@ -83,6 +85,28 @@ class AgentTests(unittest.TestCase):
                 "sources": [{"title": "Source A", "url": "https://example.com/a"}],
             },
         )
+
+    def test_chat_completion_retries_with_backup_model(self):
+        class FakeCompletions:
+            def __init__(self):
+                self.models = []
+
+            def create(self, model, messages):
+                self.models.append(model)
+                if model == agent.MODEL:
+                    raise OpenAIError("primary unavailable")
+                return "backup response"
+
+        completions = FakeCompletions()
+        client = SimpleNamespace(
+            chat=SimpleNamespace(completions=completions)
+        )
+
+        with patch("agent._get_llm_client", return_value=client):
+            response = agent._chat_completion([{"role": "user", "content": "test"}])
+
+        self.assertEqual(response, "backup response")
+        self.assertEqual(completions.models, [agent.MODEL, agent.FALLBACK_MODEL])
 
 
 if __name__ == "__main__":
