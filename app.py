@@ -31,21 +31,7 @@ EXAMPLE_PROMPTS = (
 )
 
 
-def _choose_prompt(prompt: str) -> None:
-    st.session_state["topic"] = prompt
-    st.session_state.pop("research_result", None)
-    st.session_state.pop("research_error", None)
-    st.session_state.pop("research_error_detail", None)
-
-
-def _reset_research() -> None:
-    st.session_state["topic"] = ""
-    st.session_state.pop("research_result", None)
-    st.session_state.pop("research_error", None)
-    st.session_state.pop("research_error_detail", None)
-
-
-def _render_result(result: dict) -> None:
+def _render_result(result: dict, key: str) -> None:
     if result.get("error"):
         st.error(str(result["error"]))
         return
@@ -56,10 +42,17 @@ def _render_result(result: dict) -> None:
         st.error("The research agent did not return a report.")
         return
     if not isinstance(sources, list):
-        st.error("The research agent returned an invalid source list.")
-        return
+        sources = []
 
-    st.markdown(report)
+    images = [
+        url
+        for url in result.get("images", [])
+        if isinstance(url, str) and url.startswith(("https://", "http://"))
+    ]
+    if images:
+        columns = st.columns(3)
+        for index, url in enumerate(images[:6]):
+            columns[index % 3].image(url, use_container_width=True)
 
     valid_sources = [
         source
@@ -69,6 +62,10 @@ def _render_result(result: dict) -> None:
         and isinstance(source.get("url"), str)
         and source["url"].startswith(("https://", "http://"))
     ]
+
+    st.caption(f"{len(report.split())} words · {len(valid_sources)} sources")
+    st.markdown(report)
+
     if valid_sources:
         st.subheader("Sources")
         for index, source in enumerate(valid_sources, start=1):
@@ -78,9 +75,9 @@ def _render_result(result: dict) -> None:
                     st.write(f"{index}. {source['title']}")
                 with link_column:
                     st.link_button(
-                        "Open source",
+                        "Open",
                         source["url"],
-                        key=f"source_{index}",
+                        key=f"{key}_src_{index}",
                     )
     else:
         st.info("No source links were found for this topic.")
@@ -88,8 +85,7 @@ def _render_result(result: dict) -> None:
     download_content = report
     if valid_sources:
         source_lines = [
-            f"- [{source['title']}]({source['url']})"
-            for source in valid_sources
+            f"- [{source['title']}]({source['url']})" for source in valid_sources
         ]
         download_content += "\n\n## Sources\n\n" + "\n".join(source_lines)
 
@@ -98,85 +94,105 @@ def _render_result(result: dict) -> None:
         data=download_content,
         file_name="research-report.md",
         mime="text/markdown",
+        key=f"{key}_download",
     )
+
+
+def _queue_prompt(prompt: str) -> None:
+    st.session_state["pending"] = prompt
+
+
+def _new_chat() -> None:
+    st.session_state["history"] = []
+    st.session_state.pop("pending", None)
 
 
 st.set_page_config(page_title="AI Research Assistant", layout="wide")
 st.title("AI Research Assistant")
 st.write("Turn a topic into a sourced research report.")
 
+if "history" not in st.session_state:
+    st.session_state["history"] = []
+
 with st.sidebar:
     st.header("Example prompts")
-    for index, (label, prompt) in enumerate(EXAMPLE_PROMPTS):
+    for index, (label, prompt_text) in enumerate(EXAMPLE_PROMPTS):
         st.button(
             label,
             key=f"example_{index}",
-            on_click=_choose_prompt,
-            args=(prompt,),
+            on_click=_queue_prompt,
+            args=(prompt_text,),
             use_container_width=True,
         )
+    st.divider()
+    st.button(
+        "New chat",
+        key="new_chat",
+        on_click=_new_chat,
+        use_container_width=True,
+    )
 
-topic = st.text_input(
-    "What would you like to research?",
-    key="topic",
-    placeholder="For example: Compare the leading approaches to grid-scale energy storage",
+# Show all previous questions and reports, one after another.
+for index, entry in enumerate(st.session_state["history"]):
+    with st.chat_message("user"):
+        st.write(entry["topic"])
+    with st.chat_message("assistant"):
+        if entry.get("error"):
+            st.error(entry["error"])
+            if entry.get("detail"):
+                st.caption(entry["detail"])
+        else:
+            _render_result(entry["result"], key=f"h{index}")
+
+prompt = st.chat_input("What would you like to research?") or st.session_state.pop(
+    "pending", None
 )
 
-start_column, reset_column = st.columns([3, 1])
-with start_column:
-    start_clicked = st.button(
-        "Start Research",
-        key="start_research",
-        type="primary",
-        use_container_width=True,
-    )
-with reset_column:
-    st.button(
-        "Reset",
-        key="reset_research",
-        on_click=_reset_research,
-        use_container_width=True,
-    )
+if prompt and prompt.strip():
+    prompt = prompt.strip()
+    new_index = len(st.session_state["history"])
+    entry = {"topic": prompt}
 
-if start_clicked:
-    st.session_state.pop("research_result", None)
-    st.session_state.pop("research_error", None)
-    st.session_state.pop("research_error_detail", None)
+    with st.chat_message("user"):
+        st.write(prompt)
 
-    if not topic.strip():
-        st.session_state["research_error"] = (
-            "Enter a research topic or choose an example prompt."
-        )
-    else:
+    with st.chat_message("assistant"):
         with st.status("Planning queries...", expanded=True) as status:
             try:
-                result = run_research(topic, progress_callback=status.write)
+                result = run_research(prompt, progress_callback=status.write)
             except (OpenAIError, RuntimeError, TimeoutError, ValueError) as error:
                 status.update(label="Research could not be completed", state="error")
-                st.session_state["research_error"] = (
+                entry["error"] = (
                     "Research could not be completed. Check that Bifrost is running "
                     "and your API keys are configured."
                 )
-                st.session_state["research_error_detail"] = str(error)
+                entry["detail"] = str(error)
             else:
                 if not isinstance(result, dict):
-                    status.update(label="Research returned an invalid response", state="error")
-                    st.session_state["research_error"] = (
+                    status.update(
+                        label="Research returned an invalid response", state="error"
+                    )
+                    entry["error"] = (
                         "The research service returned an unexpected response."
                     )
                 elif result.get("error"):
-                    status.update(label="Research could not be completed", state="error")
-                    st.session_state["research_error"] = str(result["error"])
+                    status.update(
+                        label="Research could not be completed", state="error"
+                    )
+                    entry["error"] = str(result["error"])
                 else:
-                    status.update(label="Research complete", state="complete")
-                    st.session_state["research_result"] = result
+                    status.update(
+                        label="Research complete", state="complete", expanded=False
+                    )
+                    entry["result"] = result
 
-if error := st.session_state.get("research_error"):
-    st.error(error)
-    if detail := st.session_state.get("research_error_detail"):
-        st.caption(detail)
+        if entry.get("error"):
+            st.error(entry["error"])
+            if entry.get("detail"):
+                st.caption(entry["detail"])
+        else:
+            _render_result(entry["result"], key=f"h{new_index}")
 
-if result := st.session_state.get("research_result"):
-    _render_result(result)
+    st.session_state["history"].append(entry)
 
 st.caption("Built with Streamlit, Tavily, and Bifrost.")
