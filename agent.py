@@ -132,10 +132,17 @@ def search_web(queries: list[str]) -> dict[str, Any]:
     source_text = []
     errors = []
     seen_urls = set()
+    images = []
+    seen_images = set()
 
     for query in queries:
         try:
-            response = client.search(query=query, max_results=3, search_depth="basic")
+            response = client.search(
+                query=query,
+                max_results=3,
+                search_depth="basic",
+                include_images=True,
+            )
         except SEARCH_ERRORS as error:
             errors.append(f"{query}: {error}")
             if isinstance(
@@ -144,6 +151,12 @@ def search_web(queries: list[str]) -> dict[str, Any]:
             ):
                 break
             continue
+
+        for image in response.get("images", []):
+            image_url = image if isinstance(image, str) else (image or {}).get("url")
+            if image_url and image_url not in seen_images:
+                seen_images.add(image_url)
+                images.append(image_url)
 
         for result in response.get("results", []):
             url = str(result.get("url") or "").strip()
@@ -165,6 +178,7 @@ def search_web(queries: list[str]) -> dict[str, Any]:
     return {
         "text": "\n\n".join(source_text),
         "sources": sources,
+        "images": images[:6],
         "errors": errors,
     }
 
@@ -219,6 +233,7 @@ def run_research(
         return {
             "report": "## Research not started\n\nPlease enter a non-empty topic.",
             "sources": [],
+            "images": [],
         }
 
     if progress_callback:
@@ -236,4 +251,5 @@ def run_research(
     return {
         "report": report,
         "sources": results["sources"],
+        "images": results["images"],
     }
