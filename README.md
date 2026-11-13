@@ -24,6 +24,16 @@ the report.
 ```
 
 Source numbers in the report match the order of the returned `sources` list.
+The result also includes relevant image URLs when Tavily finds them:
+
+```python
+{
+    "report": "Markdown report or a short conversational reply",
+    "sources": [{"title": "Source title", "url": "https://example.com"}],
+    "images": [{"url": "https://example.com/image.jpg", "description": "Caption"}],
+    "kind": "chat",  # only present for casual chat replies
+}
+```
 
 ## Setup
 
@@ -73,10 +83,16 @@ streamlit run app.py
 ```
 
 Open the local Streamlit URL shown in the terminal (usually
-`http://localhost:8501`). Enter a topic or select an example prompt, then click
-**Start Research**. The app shows planning, searching, and report-writing
-progress. Use **Reset** to clear the topic and result, or **Download report**
-to save the Markdown report and source links.
+`http://localhost:8501`). Enter a question or select an example prompt, then
+click **Search**. Casual greetings receive a direct AI reply; research topics
+show planning, searching, and report-writing progress with relevant images when
+available. Earlier searches and their results remain in the history for the
+current Streamlit session. Use **Download report** to save a report and source
+links.
+
+If Bifrost reports an authentication error, verify that `BIFROST_API_KEY` is a
+valid Bifrost virtual key and that it allows both configured models. The app
+cannot repair a missing or invalid provider key.
 
 ## Tests
 

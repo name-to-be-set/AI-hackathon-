@@ -8,10 +8,16 @@ APP_FILE = str(Path(__file__).with_name("app.py"))
 
 
 class AppTests(unittest.TestCase):
-    def test_examples_render_report_sources_and_reset(self):
+    def test_examples_render_report_sources_and_keep_history(self):
         result = {
             "report": "# Sample report\nA finding [1].",
             "sources": [{"title": "Example source", "url": "https://example.com"}],
+            "images": [
+                {
+                    "url": "https://example.com/image.jpg",
+                    "description": "Example illustration",
+                }
+            ],
         }
         stages = []
 
@@ -27,12 +33,14 @@ class AppTests(unittest.TestCase):
 
         with patch("agent.run_research", side_effect=fake_research) as research:
             app = AppTest.from_file(APP_FILE).run()
-            app.button[2].click().run()
+            app.button[1].click().run()
             self.assertIn("AI note-taking apps", app.text_input[0].value)
             app.button[0].click().run()
 
             self.assertFalse(app.exception)
             self.assertTrue(research.called)
+            self.assertEqual(app.button[0].label, "Search")
+            self.assertFalse(any(button.label == "Reset" for button in app.button))
             self.assertEqual(len(app.download_button), 1)
             self.assertTrue(
                 any("Sample report" in element.value for element in app.markdown)
@@ -43,15 +51,19 @@ class AppTests(unittest.TestCase):
                     for element in app.link_button
                 )
             )
+            self.assertEqual(len(app.image), 1)
             self.assertEqual(
                 stages,
                 ["Planning queries...", "Searching web...", "Writing report..."],
             )
 
-            app.button[1].click().run()
-            self.assertEqual(app.text_input[0].value, "")
-            self.assertFalse(
-                any("Sample report" in element.value for element in app.markdown)
+            app.text_input[0].set_value("A second topic").run()
+            app.button[0].click().run()
+            self.assertEqual(app.text_input[0].value, "A second topic")
+            self.assertEqual(
+                app.session_state["research_history"][0]["topic"],
+                "Assess the current market for AI note-taking apps: target users, "
+                "leading products, differentiators, and growth drivers.",
             )
 
     def test_timeout_shows_friendly_error_without_traceback(self):
@@ -62,7 +74,7 @@ class AppTests(unittest.TestCase):
 
         self.assertFalse(app.exception)
         self.assertTrue(
-            any("Research could not be completed" in item.value for item in app.error)
+            any("request could not be completed" in item.value for item in app.error)
         )
 
     def test_empty_topic_shows_prompt(self):
@@ -71,7 +83,7 @@ class AppTests(unittest.TestCase):
 
         self.assertFalse(app.exception)
         self.assertTrue(
-            any("Enter a research topic" in item.value for item in app.error)
+            any("Enter a question" in item.value for item in app.error)
         )
 
 

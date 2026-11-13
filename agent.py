@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from dotenv import load_dotenv
-from openai import OpenAI, OpenAIError
+from openai import AuthenticationError, OpenAI, OpenAIError
 from requests.exceptions import RequestException
 from tavily import (
     BadRequestError,
@@ -44,6 +44,11 @@ def _chat_completion(messages: list[dict[str, str]]) -> Any:
     client = _get_llm_client()
     try:
         return client.chat.completions.create(model=MODEL, messages=messages)
+    except AuthenticationError as error:
+        raise RuntimeError(
+            "Bifrost rejected BIFROST_API_KEY. Check that the virtual key is valid "
+            "and permits the configured models."
+        ) from error
     except OpenAIError as primary_error:
         LOGGER.warning(
             "Bifrost model %s failed; retrying with %s: %s",
@@ -56,6 +61,11 @@ def _chat_completion(messages: list[dict[str, str]]) -> Any:
                 model=FALLBACK_MODEL,
                 messages=messages,
             )
+        except AuthenticationError as fallback_error:
+            raise RuntimeError(
+                "Bifrost rejected BIFROST_API_KEY. Check that the virtual key is "
+                "valid and permits the configured models."
+            ) from fallback_error
         except OpenAIError as fallback_error:
             raise RuntimeError(
                 f"Both Bifrost models failed. Primary: {primary_error}; "
@@ -121,6 +131,32 @@ def generate_queries(topic: str) -> list[str]:
     return _parse_queries(content)
 
 
+def _is_casual_message(topic: str) -> bool:
+    normalized = re.sub(r"[!?.।\s]+$", "", topic.strip().casefold())
+    return normalized in {
+        "hi",
+        "hi there",
+        "hello",
+        "hello there",
+        "hey",
+        "hey there",
+        "how are you",
+        "how are you doing",
+        "how are you today",
+        "how's it going",
+        "what's up",
+        "good morning",
+        "good afternoon",
+        "good evening",
+        "thanks",
+        "thank you",
+        "হাই",
+        "হ্যালো",
+        "কেমন আছেন",
+        "কেমন আছো",
+    }
+
+
 def search_web(queries: list[str]) -> dict[str, Any]:
     """Search the web, remove duplicate URLs, and number source text."""
     api_key = os.getenv("TAVILY_API_KEY")
@@ -130,10 +166,10 @@ def search_web(queries: list[str]) -> dict[str, Any]:
     client = TavilyClient(api_key=api_key)
     sources = []
     source_text = []
+    images = []
     errors = []
     seen_urls = set()
-    images = []
-    seen_images = set()
+    seen_image_urls = set()
 
     for query in queries:
         try:
@@ -144,19 +180,30 @@ def search_web(queries: list[str]) -> dict[str, Any]:
                 include_images=True,
             )
         except SEARCH_ERRORS as error:
+            if isinstance(error, (InvalidAPIKeyError, MissingAPIKeyError)):
+                raise RuntimeError(
+                    "Tavily rejected TAVILY_API_KEY. Check that the key is valid."
+                ) from error
             errors.append(f"{query}: {error}")
-            if isinstance(
-                error,
-                (InvalidAPIKeyError, MissingAPIKeyError, UsageLimitExceededError),
-            ):
+            if isinstance(error, UsageLimitExceededError):
                 break
             continue
 
-        for image in response.get("images", []):
-            image_url = image if isinstance(image, str) else (image or {}).get("url")
-            if image_url and image_url not in seen_images:
-                seen_images.add(image_url)
-                images.append(image_url)
+        for image in response.get("images") or []:
+            if isinstance(image, str):
+                image_url = image.strip()
+                description = ""
+            elif isinstance(image, dict):
+                image_url = str(image.get("url") or "").strip()
+                description = str(image.get("description") or "").strip()
+            else:
+                continue
+            if (
+                image_url.startswith(("https://", "http://"))
+                and image_url not in seen_image_urls
+            ):
+                images.append({"url": image_url, "description": description})
+                seen_image_urls.add(image_url)
 
         for result in response.get("results", []):
             url = str(result.get("url") or "").strip()
@@ -178,7 +225,7 @@ def search_web(queries: list[str]) -> dict[str, Any]:
     return {
         "text": "\n\n".join(source_text),
         "sources": sources,
-        "images": images[:6],
+        "images": images,
         "errors": errors,
     }
 
@@ -232,6 +279,31 @@ def run_research(
     if not isinstance(topic, str) or not topic.strip():
         return {
             "report": "## Research not started\n\nPlease enter a non-empty topic.",
+            "sources": [],
+            "images": [],
+        }
+
+    if _is_casual_message(topic):
+        if progress_callback:
+            progress_callback("Replying...")
+        response = _chat_completion(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "Reply naturally and briefly to the user's casual message. "
+                        "Do not search the web or invent a research report."
+                    ),
+                },
+                {"role": "user", "content": topic.strip()},
+            ]
+        )
+        reply = response.choices[0].message.content or ""
+        if not reply.strip():
+            raise RuntimeError("The AI returned an empty reply.")
+        return {
+            "kind": "chat",
+            "report": reply,
             "sources": [],
             "images": [],
         }
