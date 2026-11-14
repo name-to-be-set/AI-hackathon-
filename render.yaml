@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: ai-research-assistant
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.address 0.0.0.0 --server.port $PORT
+    healthCheckPath: /
+    envVars:
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: BIFROST_API_KEY
+        sync: false
+      - key: BIFROST_BASE_URL
+        sync: false

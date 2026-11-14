@@ -1,54 +1,350 @@
+
+import base64
+import html
+import json
+import os
+import random
+import re
+import sqlite3
+import uuid
+from contextlib import closing
+from datetime import datetime, timezone
+from io import BytesIO
+from pathlib import Path
+
 import streamlit as st
 from openai import OpenAIError
+from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.pagesizes import LETTER
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
-from agent import run_research
+from agent import run_research, transcribe_audio
 
-EXAMPLE_PROMPTS = (
-    (
-        "Market research",
-        "Assess the current market for AI note-taking apps: target users, leading products, differentiators, and growth drivers.",
-    ),
-    (
-        "Technical comparison",
-        "Compare LFP and NMC batteries for grid-scale storage across safety, cost, lifespan, and recyclability.",
-    ),
-    (
-        "Recent developments",
-        "What are the most significant developments in open-source large language models in the past six months?",
-    ),
-    (
-        "Policy and regulation",
-        "Summarize current regulatory approaches to generative AI transparency in the EU and United States.",
-    ),
-    (
-        "Case studies",
-        "Find examples of small businesses using AI customer-support agents and summarize outcomes and pitfalls.",
-    ),
-    (
-        "Evidence review",
-        "What does recent research say about how blue-light exposure affects sleep, and what are the main limitations?",
-    ),
+CHAT_DB_PATH = Path(
+    os.getenv(
+        "CHAT_DB_PATH",
+        str(Path.home() / ".ai_research_assistant" / "chats.sqlite3"),
+    )
+)
+CHAT_PLACEHOLDERS = (
+    "Ask me anything...",
+    "What's on your mind?",
+    "Type or tap the mic to speak...",
+    "What would you like to explore?",
 )
 
 
-def _choose_prompt(prompt: str) -> None:
-    st.session_state["topic"] = prompt
+def _connect_chat_store() -> sqlite3.Connection:
+    CHAT_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(CHAT_DB_PATH)
+    connection.row_factory = sqlite3.Row
+    return connection
 
 
-def _archive_latest_search() -> None:
-    topic = st.session_state.get("last_search_topic")
-    result = st.session_state.get("research_result")
-    error = st.session_state.get("research_error")
-    if topic and (result or error):
-        st.session_state.setdefault("research_history", []).insert(
-            0,
-            {
-                "topic": topic,
-                "result": result,
-                "error": error,
-                "error_detail": st.session_state.get("research_error_detail"),
-            },
+def _initialize_chat_store() -> None:
+    with closing(_connect_chat_store()) as connection, connection:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chats (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                messages TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
         )
+
+
+def _save_chat(chat_id: str, messages: list[dict]) -> None:
+    title = next(
+        (
+            message["content"].strip().replace("\n", " ")[:48]
+            for message in messages
+            if message.get("role") == "user"
+            and isinstance(message.get("content"), str)
+        ),
+        "New chat",
+    )
+    with closing(_connect_chat_store()) as connection, connection:
+        connection.execute(
+            """
+            INSERT INTO chats (id, title, messages, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                messages = excluded.messages,
+                updated_at = excluded.updated_at
+            """,
+            (
+                chat_id,
+                title,
+                json.dumps(messages),
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+
+
+def _load_chats() -> list[sqlite3.Row]:
+    with closing(_connect_chat_store()) as connection, connection:
+        return connection.execute(
+            "SELECT id, title FROM chats WHERE messages != '[]' "
+            "ORDER BY updated_at DESC"
+        ).fetchall()
+
+
+def _load_chat(chat_id: str) -> list[dict]:
+    with closing(_connect_chat_store()) as connection, connection:
+        row = connection.execute(
+            "SELECT messages FROM chats WHERE id = ?",
+            (chat_id,),
+        ).fetchone()
+    return json.loads(row["messages"]) if row else []
+
+
+def _start_new_chat() -> None:
+    chat_id = uuid.uuid4().hex
+    st.session_state["chat_id"] = chat_id
+    st.session_state["messages"] = []
+    st.session_state["greeting"] = _time_greeting()
+    st.session_state.pop("share_message", None)
+    _save_chat(chat_id, [])
+
+
+def _time_greeting(hour: int | None = None) -> str:
+    if hour is None:
+        hour = datetime.now().astimezone().hour
+    if 5 <= hour < 12:
+        return "Good morning. How was breakfast? What would you like to work on today?"
+    if 12 <= hour < 15:
+        return "Hope lunch went well. What should we tackle this afternoon?"
+    if 15 <= hour < 19:
+        return "Hope your day's going smoothly. What would you like to make progress on?"
+    if 19 <= hour < 23:
+        return "How has your day been? What can I help you wrap up?"
+    return "You're up late. What can I help you work through?"
+
+
+def _visible_report(report: str) -> str:
+    return re.sub(r"\s*\[(?:\d+(?:\s*,\s*\d+)*)\]", "", report)
+
+
+def _build_pdf(report: str, sources: list[dict]) -> bytes:
+    buffer = BytesIO()
+    document = SimpleDocTemplate(
+        buffer,
+        pagesize=LETTER,
+        rightMargin=0.75 * inch,
+        leftMargin=0.75 * inch,
+        topMargin=0.75 * inch,
+        bottomMargin=0.75 * inch,
+        title="AI Research Assistant response",
+    )
+    styles = getSampleStyleSheet()
+    styles.add(
+        ParagraphStyle(
+            name="ReportBody",
+            parent=styles["BodyText"],
+            leading=15,
+            spaceAfter=7,
+            alignment=TA_LEFT,
+        )
+    )
+    story = []
+    for line in _visible_report(report).splitlines():
+        stripped = line.strip()
+        if not stripped:
+            story.append(Spacer(1, 5))
+            continue
+        heading = re.match(r"^(#{1,6})\s+(.+)$", stripped)
+        if heading:
+            style = styles[
+                "Heading1" if len(heading.group(1)) < 3 else "Heading2"
+            ]
+            story.append(Paragraph(html.escape(heading.group(2)), style))
+            continue
+        bullet = re.match(r"^[-*]\s+(.+)$", stripped)
+        text = f"- {bullet.group(1)}" if bullet else stripped
+        story.append(Paragraph(html.escape(text), styles["ReportBody"]))
+
+    if sources:
+        story.append(Paragraph("Sources", styles["Heading2"]))
+        for source in sources:
+            title = html.escape(str(source.get("title", "Source")))
+            url = html.escape(str(source.get("url", "")), quote=True)
+            story.append(
+                Paragraph(
+                    f'{title}<br/><link href="{url}">{url}</link>',
+                    styles["ReportBody"],
+                )
+            )
+
+    document.build(story)
+    return buffer.getvalue()
+
+
+def _render_images(images: object) -> None:
+    if not isinstance(images, list):
+        return
+    for image in images[:1]:
+        if not isinstance(image, dict):
+            continue
+        description = image.get("description") or None
+        url = image.get("url")
+        encoded = image.get("base64")
+        if isinstance(url, str) and url.startswith(("https://", "http://")):
+            st.image(url, caption=description, width=500)
+        elif isinstance(encoded, str):
+            st.image(
+                base64.b64decode(encoded),
+                caption=description,
+                width=500,
+            )
+
+
+def _render_reply_actions(
+    message: dict,
+    key_prefix: str,
+    chat_id: str | None = None,
+    messages: list[dict] | None = None,
+) -> None:
+    result = message.get("result")
+    report = result.get("report") if isinstance(result, dict) else message.get("error")
+    if not isinstance(report, str) or not report.strip():
+        return
+    report = _visible_report(report)
+
+    with st.container(key=f"{key_prefix}_actions"):
+        (
+            like_column,
+            dislike_column,
+            share_column,
+            copy_column,
+        ) = st.columns([1, 1, 1, 1], gap="small")
+        with like_column:
+            if st.button(
+                "👍",
+                key=f"{key_prefix}_like",
+                help="Mark this as a good reply",
+                type=(
+                    "primary"
+                    if message.get("feedback") == "like"
+                    else "tertiary"
+                ),
+                use_container_width=True,
+            ):
+                message["feedback"] = (
+                    "none" if message.get("feedback") == "like" else "like"
+                )
+                if chat_id and messages is not None:
+                    _save_chat(chat_id, messages)
+                st.rerun()
+        with dislike_column:
+            if st.button(
+                "👎",
+                key=f"{key_prefix}_dislike",
+                help="Mark this as a bad reply",
+                type=(
+                    "primary"
+                    if message.get("feedback") == "dislike"
+                    else "tertiary"
+                ),
+                use_container_width=True,
+            ):
+                message["feedback"] = (
+                    "none" if message.get("feedback") == "dislike" else "dislike"
+                )
+                if chat_id and messages is not None:
+                    _save_chat(chat_id, messages)
+                st.rerun()
+        with share_column:
+            if st.button(
+                "Share",
+                key=f"{key_prefix}_share",
+                type="tertiary",
+                use_container_width=True,
+            ):
+                st.session_state["share_message"] = key_prefix
+        with copy_column:
+            encoded_report = base64.b64encode(report.encode("utf-8")).decode("ascii")
+            st.html(
+                f"""
+                <button id="copy-reply-{key_prefix}" type="button" aria-label="Copy reply"
+                    style="background:transparent;border:0;color:#e5e7eb;
+                    font:inherit;padding:5px 8px;cursor:pointer;white-space:nowrap;">
+                    Copy
+                </button>
+                <script>
+                (() => {{
+                    const button = document.getElementById("copy-reply-{key_prefix}");
+                    const text = new TextDecoder().decode(
+                        Uint8Array.from(atob("{encoded_report}"), character =>
+                            character.charCodeAt(0))
+                    );
+                    button.addEventListener("click", async () => {{
+                        try {{
+                            await navigator.clipboard.writeText(text);
+                            button.textContent = "Copied";
+                        }} catch {{
+                            const input = document.createElement("textarea");
+                            input.value = text;
+                            document.body.appendChild(input);
+                            input.select();
+                            const copied = document.execCommand("copy");
+                            input.remove();
+                            button.textContent = copied ? "Copied" : "Copy unavailable";
+                        }}
+                    }});
+                }})();
+                </script>
+                """,
+                unsafe_allow_javascript=True,
+            )
+
+    if isinstance(result, dict):
+        sources = result.get("sources")
+        valid_sources = []
+        if isinstance(sources, list):
+            valid_sources = [
+                source
+                for source in sources
+                if isinstance(source, dict)
+                and isinstance(source.get("url"), str)
+                and source["url"].startswith(("https://", "http://"))
+            ]
+        st.download_button(
+            "Download PDF",
+            data=_build_pdf(report, valid_sources),
+            file_name="response.pdf",
+            mime="application/pdf",
+            key=f"{key_prefix}_pdf",
+            help="Download this reply as a PDF",
+            width="content",
+        )
+
+    if st.session_state.get("share_message") == key_prefix:
+        with st.expander(
+            "Share this reply",
+            expanded=True,
+            key=f"{key_prefix}_share_text",
+        ):
+            st.caption("Copy the text below to share this reply.")
+            st.code(report, language=None, wrap_lines=True)
+
+
+def _conversation_history(messages: list[dict]) -> list[dict[str, str]]:
+    history = []
+    for message in messages:
+        if message.get("role") == "user" and isinstance(message.get("content"), str):
+            history.append({"role": "user", "content": message["content"]})
+        elif message.get("role") == "assistant":
+            result = message.get("result")
+            if isinstance(result, dict) and isinstance(result.get("report"), str):
+                history.append({"role": "assistant", "content": result["report"]})
+            elif isinstance(message.get("error"), str):
+                history.append({"role": "assistant", "content": message["error"]})
+    return history[-10:]
 
 
 def _render_result(result: dict, key_prefix: str = "result") -> None:
@@ -60,7 +356,10 @@ def _render_result(result: dict, key_prefix: str = "result") -> None:
     if not isinstance(report, str) or not report.strip():
         st.error("The research agent did not return a report.")
         return
+    report = _visible_report(report)
     st.markdown(report)
+    _render_images(result.get("images"))
+
     if result.get("kind") == "chat":
         return
 
@@ -68,28 +367,6 @@ def _render_result(result: dict, key_prefix: str = "result") -> None:
     if not isinstance(sources, list):
         st.error("The research agent returned an invalid source list.")
         return
-
-    images = result.get("images")
-    valid_images = []
-    if isinstance(images, list):
-        valid_images = [
-            image
-            for image in images
-            if isinstance(image, dict)
-            and isinstance(image.get("url"), str)
-            and image["url"].startswith(("https://", "http://"))
-        ]
-    if valid_images:
-        st.subheader("Images")
-        image_columns = st.columns(min(len(valid_images), 3))
-        for index, image in enumerate(valid_images):
-            with image_columns[index % len(image_columns)]:
-                st.image(
-                    image["url"],
-                    caption=image.get("description") or None,
-                    width="stretch",
-                )
-
     valid_sources = [
         source
         for source in sources
@@ -99,18 +376,18 @@ def _render_result(result: dict, key_prefix: str = "result") -> None:
         and source["url"].startswith(("https://", "http://"))
     ]
     if valid_sources:
-        st.subheader("Sources")
-        for index, source in enumerate(valid_sources, start=1):
-            with st.container(border=True):
-                title_column, link_column = st.columns([5, 1])
-                with title_column:
-                    st.write(f"{index}. {source['title']}")
-                with link_column:
-                    st.link_button(
-                        "Open source",
-                        source["url"],
-                        key=f"{key_prefix}_source_{index}",
-                    )
+        with st.expander(
+            "Sources",
+            expanded=False,
+            key=f"{key_prefix}_sources",
+            type="compact",
+        ):
+            for index, source in enumerate(valid_sources, start=1):
+                st.link_button(
+                    f"{index}. {source['title']}",
+                    source["url"],
+                    key=f"{key_prefix}_source_{index}",
+                )
     else:
         st.info("No source links were found for this topic.")
 
@@ -131,93 +408,303 @@ def _render_result(result: dict, key_prefix: str = "result") -> None:
     )
 
 
-st.set_page_config(page_title="AI Research Assistant", layout="wide")
-st.title("AI Research Assistant")
-st.write("Ask a quick question or turn a topic into a sourced research report.")
+def _render_conversation(messages: list[dict]) -> None:
+    for index, message in enumerate(messages):
+        if message.get("role") == "user":
+            with st.chat_message("user"):
+                st.markdown(message["content"])
+            continue
 
-st.session_state.setdefault("research_history", [])
+        with st.chat_message("assistant"):
+            if progress := message.get("progress"):
+                with st.expander(
+                    "Thinking",
+                    expanded=False,
+                    key=f"thinking_{index}",
+                    type="compact",
+                ):
+                    for step in progress:
+                        st.caption(step)
+
+            if error := message.get("error"):
+                st.error(error)
+                if detail := message.get("error_detail"):
+                    st.caption(detail)
+            elif result := message.get("result"):
+                _render_result(result, key_prefix=f"chat_{index}")
+            _render_reply_actions(
+                message,
+                key_prefix=f"chat_{index}",
+                chat_id=st.session_state["chat_id"],
+                messages=messages,
+            )
+
+
+st.set_page_config(page_title="AI Research Assistant", layout="wide")
+st.markdown(
+    """
+    <style>
+    @import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap");
+
+    .stApp {
+        font-family: "DM Sans", "Segoe UI", system-ui, sans-serif;
+    }
+
+    div[class*="_actions"] div[data-testid="stHorizontalBlock"] {
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        gap: 0.3rem !important;
+    }
+
+    div[class*="_actions"] div[data-testid="stColumn"] {
+        width: 0 !important;
+        flex: 1 1 0% !important;
+        min-width: 0 !important;
+        padding-inline: 0 !important;
+    }
+
+    div[class*="_actions"] button {
+        min-width: 0 !important;
+        white-space: nowrap !important;
+        padding-inline: 0.25rem !important;
+        font-size: 0.82rem !important;
+    }
+
+    div[data-testid="stMarkdownContainer"] h1 {
+        font-size: 1.65rem;
+        font-weight: 700;
+    }
+
+    div[data-testid="stMarkdownContainer"] h2 {
+        font-size: 1.35rem;
+        font-weight: 700;
+    }
+
+    div[data-testid="stMarkdownContainer"] h3 {
+        font-size: 1.12rem;
+        font-weight: 600;
+    }
+
+    div[data-testid="stCheckbox"] input {
+        accent-color: #ffffff;
+    }
+
+    div[data-testid="stCheckbox"] input:focus-visible {
+        outline: 2px solid #ffffff;
+        outline-offset: 2px;
+    }
+
+    .st-key-chat_input button {
+        width: 32px;
+        height: 32px;
+        min-height: 32px;
+        padding: 0;
+        border-radius: 50%;
+    }
+
+    div[data-testid="stChatInput"] {
+        width: min(100%, 520px) !important;
+        max-width: 520px !important;
+        margin-inline: auto !important;
+        padding: 0 !important;
+        border: none !important;
+        border-radius: 0;
+        box-shadow: none !important;
+    }
+
+    div[data-testid="stChatInput"] > div {
+        border: 1px solid rgba(100, 116, 139, 0.5) !important;
+        border-radius: 10px !important;
+        outline: none !important;
+        box-shadow: none !important;
+    }
+
+    div[data-testid="stChatInput"] textarea {
+        min-height: 40px !important;
+        max-height: 4.5rem;
+        font-size: 0.95rem;
+        border-radius: 8px;
+        font-family: inherit;
+        caret-color: #ffffff !important;
+        cursor: text;
+        border-color: transparent !important;
+        outline: none !important;
+        box-shadow: none !important;
+    }
+
+    div[data-testid="stChatInput"] textarea:focus {
+        border-color: transparent !important;
+        outline: none !important;
+        box-shadow: none !important;
+    }
+
+    div[data-testid="stChatInput"] textarea::placeholder {
+        color: #64748b !important;
+        opacity: 0.48 !important;
+    }
+
+    div[data-testid="stChatInput"]:focus-within {
+        border: none !important;
+    }
+
+    div[data-testid="stChatInput"]:focus-within > div {
+        border-color: #ffffff !important;
+    }
+
+    section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
+        justify-content: flex-start;
+        text-align: left;
+        min-height: 2rem;
+        padding: 0.35rem 0.6rem;
+        border-color: transparent;
+        border-radius: 0.55rem;
+    }
+
+    section[data-testid="stSidebar"] div[data-testid="stButton"] > button > div {
+        justify-content: flex-start !important;
+    }
+
+    section[data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="primary"] {
+        background: rgba(255, 255, 255, 0.12);
+        border-color: rgba(255, 255, 255, 0.2);
+        color: #ffffff;
+    }
+
+    .st-key-new_chat_top button {
+        min-width: 38px;
+        border-radius: 10px;
+        font-size: 1.2rem;
+    }
+
+    .st-key-new_chat_top {
+        margin-top: -1rem;
+    }
+
+    div[data-testid="stChatMessage"] div[data-testid="stButton"] button {
+        border-color: transparent;
+        padding-inline: 0.4rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+_initialize_chat_store()
+if "chat_id" not in st.session_state:
+    _start_new_chat()
+if "greeting" not in st.session_state:
+    st.session_state["greeting"] = _time_greeting()
+if "chat_placeholder" not in st.session_state:
+    st.session_state["chat_placeholder"] = random.choice(CHAT_PLACEHOLDERS)
 
 with st.sidebar:
-    st.header("Example prompts")
-    for index, (label, prompt) in enumerate(EXAMPLE_PROMPTS):
-        st.button(
-            label,
-            key=f"example_{index}",
-            on_click=_choose_prompt,
-            args=(prompt,),
+    st.markdown("### Chats")
+    for saved_chat in _load_chats():
+        if st.button(
+            saved_chat["title"],
+            key=f"load_chat_{saved_chat['id']}",
             use_container_width=True,
-        )
+            type=(
+                "primary"
+                if saved_chat["id"] == st.session_state["chat_id"]
+                else "tertiary"
+            ),
+        ):
+            st.session_state["chat_id"] = saved_chat["id"]
+            st.session_state["messages"] = _load_chat(saved_chat["id"])
+            st.session_state["greeting"] = _time_greeting()
+            st.session_state.pop("share_message", None)
+            st.rerun()
 
-topic = st.text_input(
-    "What would you like to ask or research?",
-    key="topic",
-    placeholder="For example: Compare the leading approaches to grid-scale energy storage",
-)
+title_column, new_chat_column = st.columns([0.95, 0.05])
+with title_column:
+    st.title("AI Research Assistant")
+with new_chat_column:
+    if st.button("✎", key="new_chat_top", help="New chat"):
+        _start_new_chat()
+        st.rerun()
 
-start_clicked = st.button(
-    "Search",
-    key="start_research",
-    type="primary",
-    use_container_width=True,
-)
+st.session_state.setdefault("messages", [])
+messages = st.session_state["messages"]
+if messages:
+    _render_conversation(messages)
+else:
+    with st.chat_message("assistant"):
+        st.markdown(st.session_state["greeting"])
 
-if start_clicked:
-    _archive_latest_search()
-    st.session_state.pop("research_result", None)
-    st.session_state.pop("research_error", None)
-    st.session_state.pop("research_error_detail", None)
-    st.session_state["last_search_topic"] = topic.strip()
-
-    if not topic.strip():
-        st.session_state["research_error"] = (
-            "Enter a question or choose an example prompt."
-        )
+if prompt := st.chat_input(
+    st.session_state["chat_placeholder"],
+    key="chat_input",
+    accept_audio=True,
+    width=520,
+):
+    if isinstance(prompt, str):
+        topic = prompt.strip()
+        audio = None
     else:
-        with st.status("Preparing your response...", expanded=True) as status:
-            try:
-                result = run_research(topic, progress_callback=status.write)
-            except (OpenAIError, RuntimeError, TimeoutError, ValueError) as error:
-                status.update(label="Research could not be completed", state="error")
-                st.session_state["research_error"] = (
-                    "The request could not be completed. Check the error details below."
+        topic = prompt.text.strip()
+        audio = prompt.audio
+
+    if audio is not None:
+        try:
+            with st.spinner("Transcribing your voice..."):
+                transcript = transcribe_audio(
+                    (audio.name, audio.getvalue(), audio.type or "audio/wav")
                 )
-                st.session_state["research_error_detail"] = str(error)
-            else:
-                if not isinstance(result, dict):
-                    status.update(label="Research returned an invalid response", state="error")
-                    st.session_state["research_error"] = (
-                        "The research service returned an unexpected response."
+            topic = "\n".join(part for part in (topic, transcript) if part)
+        except (OpenAIError, RuntimeError, TimeoutError, ValueError) as error:
+            st.error("Voice transcription failed. Please try again or type your message.")
+            st.caption(str(error))
+
+    if not topic and audio is None:
+        st.warning("Write a message before sending.")
+    elif topic:
+        conversation_history = _conversation_history(messages)
+        messages.append({"role": "user", "content": topic})
+        _save_chat(st.session_state["chat_id"], messages)
+        with st.chat_message("user"):
+            st.markdown(topic)
+
+        progress_steps = []
+        assistant_message = {"role": "assistant", "progress": progress_steps}
+        with st.chat_message("assistant"):
+            with st.expander(
+                "Thinking",
+                expanded=False,
+                key=f"thinking_current_{len(messages)}",
+                type="compact",
+            ):
+                progress_line = st.empty()
+
+                def update_progress(stage: str) -> None:
+                    progress_steps.append(stage)
+                    progress_line.caption(stage)
+
+                try:
+                    result = run_research(
+                        topic,
+                        progress_callback=update_progress,
+                        conversation_history=conversation_history,
                     )
-                elif result.get("error"):
-                    status.update(label="Research could not be completed", state="error")
-                    st.session_state["research_error"] = str(result["error"])
-                elif result.get("kind") == "chat":
-                    status.update(label="Reply complete", state="complete")
-                    st.session_state["research_result"] = result
+                except (OpenAIError, RuntimeError, TimeoutError, ValueError) as error:
+                    update_progress("The response could not be completed.")
+                    assistant_message["error"] = (
+                        "The request could not be completed. Check the error details below."
+                    )
+                    assistant_message["error_detail"] = str(error)
                 else:
-                    status.update(label="Research complete", state="complete")
-                    st.session_state["research_result"] = result
+                    if not isinstance(result, dict):
+                        update_progress("The service returned an unexpected response.")
+                        assistant_message["error"] = (
+                            "The research service returned an unexpected response."
+                        )
+                    elif result.get("error"):
+                        update_progress("The response could not be completed.")
+                        assistant_message["error"] = str(result["error"])
+                    else:
+                        update_progress("Response ready.")
+                        assistant_message["result"] = result
 
-if error := st.session_state.get("research_error"):
-    st.error(error)
-    if detail := st.session_state.get("research_error_detail"):
-        st.caption(detail)
-
-if result := st.session_state.get("research_result"):
-    if latest_topic := st.session_state.get("last_search_topic"):
-        st.caption(f"Latest response for: {latest_topic}")
-    _render_result(result)
-
-history = st.session_state["research_history"]
-if history:
-    with st.expander(f"Previous searches ({len(history)})"):
-        for index, entry in enumerate(history):
-            with st.expander(entry["topic"]):
-                if entry.get("error"):
-                    st.error(entry["error"])
-                    if entry.get("error_detail"):
-                        st.caption(entry["error_detail"])
-                elif entry.get("result"):
-                    _render_result(entry["result"], key_prefix=f"history_{index}")
-
-st.caption("Built with Streamlit, Tavily, and Bifrost. Search history lasts for this session.")
+        messages.append(assistant_message)
+        _save_chat(st.session_state["chat_id"], messages)
+        st.rerun()
