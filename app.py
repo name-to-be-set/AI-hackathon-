@@ -34,6 +34,7 @@ CHAT_PLACEHOLDERS = (
     "Type or tap the mic to speak...",
     "What would you like to explore?",
 )
+MAX_REQUESTS_PER_SESSION = 10
 
 
 def _connect_chat_store() -> sqlite3.Connection:
@@ -596,9 +597,14 @@ if "greeting" not in st.session_state:
     st.session_state["greeting"] = _time_greeting()
 if "chat_placeholder" not in st.session_state:
     st.session_state["chat_placeholder"] = random.choice(CHAT_PLACEHOLDERS)
+st.session_state.setdefault("demo_requests_used", 0)
 
 with st.sidebar:
     st.markdown("### Chats")
+    st.caption(
+        f"{MAX_REQUESTS_PER_SESSION - st.session_state['demo_requests_used']} "
+        "demo requests remaining"
+    )
     for saved_chat in _load_chats():
         if st.button(
             saved_chat["title"],
@@ -645,66 +651,70 @@ if prompt := st.chat_input(
         topic = prompt.text.strip()
         audio = prompt.audio
 
-    if audio is not None:
-        try:
-            with st.spinner("Transcribing your voice..."):
-                transcript = transcribe_audio(
-                    (audio.name, audio.getvalue(), audio.type or "audio/wav")
-                )
-            topic = "\n".join(part for part in (topic, transcript) if part)
-        except (OpenAIError, RuntimeError, TimeoutError, ValueError) as error:
-            st.error("Voice transcription failed. Please try again or type your message.")
-            st.caption(str(error))
-
     if not topic and audio is None:
         st.warning("Write a message before sending.")
-    elif topic:
-        conversation_history = _conversation_history(messages)
-        messages.append({"role": "user", "content": topic})
-        _save_chat(st.session_state["chat_id"], messages)
-        with st.chat_message("user"):
-            st.markdown(topic)
-
-        progress_steps = []
-        assistant_message = {"role": "assistant", "progress": progress_steps}
-        with st.chat_message("assistant"):
-            with st.expander(
-                "Thinking",
-                expanded=False,
-                key=f"thinking_current_{len(messages)}",
-                type="compact",
-            ):
-                progress_line = st.empty()
-
-                def update_progress(stage: str) -> None:
-                    progress_steps.append(stage)
-                    progress_line.caption(stage)
-
-                try:
-                    result = run_research(
-                        topic,
-                        progress_callback=update_progress,
-                        conversation_history=conversation_history,
+    elif st.session_state["demo_requests_used"] >= MAX_REQUESTS_PER_SESSION:
+        st.warning("You've reached the 10-request demo limit for this session.")
+    else:
+        st.session_state["demo_requests_used"] += 1
+        if audio is not None:
+            try:
+                with st.spinner("Transcribing your voice..."):
+                    transcript = transcribe_audio(
+                        (audio.name, audio.getvalue(), audio.type or "audio/wav")
                     )
-                except (OpenAIError, RuntimeError, TimeoutError, ValueError) as error:
-                    update_progress("The response could not be completed.")
-                    assistant_message["error"] = (
-                        "The request could not be completed. Check the error details below."
-                    )
-                    assistant_message["error_detail"] = str(error)
-                else:
-                    if not isinstance(result, dict):
-                        update_progress("The service returned an unexpected response.")
-                        assistant_message["error"] = (
-                            "The research service returned an unexpected response."
+                topic = "\n".join(part for part in (topic, transcript) if part)
+            except (OpenAIError, RuntimeError, TimeoutError, ValueError) as error:
+                st.error("Voice transcription failed. Please try again or type your message.")
+                st.caption(str(error))
+
+        if topic:
+            conversation_history = _conversation_history(messages)
+            messages.append({"role": "user", "content": topic})
+            _save_chat(st.session_state["chat_id"], messages)
+            with st.chat_message("user"):
+                st.markdown(topic)
+
+            progress_steps = []
+            assistant_message = {"role": "assistant", "progress": progress_steps}
+            with st.chat_message("assistant"):
+                with st.expander(
+                    "Thinking",
+                    expanded=False,
+                    key=f"thinking_current_{len(messages)}",
+                    type="compact",
+                ):
+                    progress_line = st.empty()
+
+                    def update_progress(stage: str) -> None:
+                        progress_steps.append(stage)
+                        progress_line.caption(stage)
+
+                    try:
+                        result = run_research(
+                            topic,
+                            progress_callback=update_progress,
+                            conversation_history=conversation_history,
                         )
-                    elif result.get("error"):
+                    except (OpenAIError, RuntimeError, TimeoutError, ValueError) as error:
                         update_progress("The response could not be completed.")
-                        assistant_message["error"] = str(result["error"])
+                        assistant_message["error"] = (
+                            "The request could not be completed. Check the error details below."
+                        )
+                        assistant_message["error_detail"] = str(error)
                     else:
-                        update_progress("Response ready.")
-                        assistant_message["result"] = result
+                        if not isinstance(result, dict):
+                            update_progress("The service returned an unexpected response.")
+                            assistant_message["error"] = (
+                                "The research service returned an unexpected response."
+                            )
+                        elif result.get("error"):
+                            update_progress("The response could not be completed.")
+                            assistant_message["error"] = str(result["error"])
+                        else:
+                            update_progress("Response ready.")
+                            assistant_message["result"] = result
 
-        messages.append(assistant_message)
-        _save_chat(st.session_state["chat_id"], messages)
-        st.rerun()
+            messages.append(assistant_message)
+            _save_chat(st.session_state["chat_id"], messages)
+            st.rerun()

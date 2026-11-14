@@ -149,6 +149,18 @@ class AppTests(unittest.TestCase):
             any("request could not be completed" in item.value for item in app.error)
         )
 
+    def test_demo_request_limit_blocks_another_research_call(self):
+        with patch("agent.run_research") as research:
+            app = AppTest.from_file(APP_FILE).run()
+            app.session_state["demo_requests_used"] = 10
+            _send_message(app, "one more request")
+
+        self.assertFalse(app.exception)
+        research.assert_not_called()
+        self.assertTrue(
+            any("10-request demo limit" in warning.value for warning in app.warning)
+        )
+
     def test_chat_history_is_saved_and_can_be_reopened(self):
         with patch(
             "agent.run_research",

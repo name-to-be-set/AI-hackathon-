@@ -142,7 +142,9 @@ The Blueprint runs Streamlit on Render's assigned port. The free instance may
 sleep when idle, so allow a short startup delay when opening the demo. Local
 chat history uses SQLite on the app's filesystem and is not durable across
 instance replacement or redeploy; that is usually acceptable for a hackathon
-demo.
+demo. The app allows up to 10 submitted messages per Streamlit session. This
+helps limit accidental demo usage, but a new session resets the count and it is
+not a provider billing limit; configure provider-side quotas separately.
 
 ## Tests
 
