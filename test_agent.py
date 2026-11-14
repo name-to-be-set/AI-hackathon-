@@ -33,6 +33,25 @@ class AgentTests(unittest.TestCase):
             base_url="https://gateway.example/v1",
         )
 
+    def test_llm_client_builds_url_from_render_bifrost_host(self):
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "BIFROST_API_KEY": "test-key",
+                    "BIFROST_HOST": "bifrost-gateway.onrender.com",
+                },
+                clear=True,
+            ),
+            patch("agent.OpenAI") as openai,
+        ):
+            agent._get_llm_client()
+
+        openai.assert_called_once_with(
+            api_key="test-key",
+            base_url="https://bifrost-gateway.onrender.com/v1",
+        )
+
     def test_llm_client_defaults_to_local_bifrost_url(self):
         with (
             patch.dict("os.environ", {"BIFROST_API_KEY": "test-key"}, clear=True),

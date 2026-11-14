@@ -132,8 +132,6 @@ virtual-key values are supplied through Render environment settings, not Git.
 - `TAVILY_API_KEY`: your Tavily API key.
 - `GROQ_API_KEY` and `GEMINI_API_KEY`: provider credentials for Bifrost.
 - `BIFROST_API_KEY`: a new Bifrost virtual key, shared by the app and Bifrost.
-- `BIFROST_BASE_URL`: the Bifrost public URL ending in `/v1`, such as
-  `https://bifrost-gateway.onrender.com/v1`. Use the actual URL shown by Render.
 
 The free Bifrost service has a public URL, so inference authentication and
 dashboard authentication are enabled. The Blueprint shares the virtual key
@@ -141,12 +139,14 @@ through a Render environment-variable group; set a fresh `sk-bf-` key there
 and do not reuse any key exposed elsewhere. Render generates the Bifrost admin
 password, setup token, and encryption key. Keep all provider credentials in
 Render's environment settings, never in Git or the repository's `.env` file.
+The Blueprint syncs the Bifrost service hostname to the app automatically; the
+app derives its HTTPS `/v1` URL from that hostname. No manual URL copy is needed.
 
 Free Render services sleep after 15 minutes without traffic and can take about
 a minute to wake. Bifrost's file-only configuration is restored at startup, but
 its dashboard configuration is read-only; change providers or virtual keys in
 `bifrost/config.json` and redeploy. For local development, keep using
-`http://localhost:8080/v1`. The `BIFROST_IMAGE_MODEL` and
+`BIFROST_BASE_URL=http://localhost:8080/v1`. The `BIFROST_IMAGE_MODEL` and
 `BIFROST_TRANSCRIPTION_MODEL` settings are optional; configure them only if
 those features are enabled for your Bifrost key.
 

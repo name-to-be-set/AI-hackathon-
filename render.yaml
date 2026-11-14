@@ -16,8 +16,11 @@ services:
       - key: TAVILY_API_KEY
         sync: false
       - fromGroup: bifrost-shared-auth
-      - key: BIFROST_BASE_URL
-        sync: false
+      - key: BIFROST_HOST
+        fromService:
+          type: web
+          name: bifrost-gateway
+          property: host
   - type: web
     name: bifrost-gateway
     runtime: docker

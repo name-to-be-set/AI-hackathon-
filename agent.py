@@ -51,7 +51,15 @@ def _get_llm_client() -> OpenAI:
     api_key = os.getenv("BIFROST_API_KEY")
     if not api_key:
         raise RuntimeError("BIFROST_API_KEY is missing from the environment.")
-    base_url = os.getenv("BIFROST_BASE_URL", "http://localhost:8080/v1")
+    base_url = os.getenv("BIFROST_BASE_URL")
+    if not base_url:
+        host = os.getenv("BIFROST_HOST", "").strip().rstrip("/")
+        if host:
+            if not host.startswith(("http://", "https://")):
+                host = f"https://{host}"
+            base_url = host if host.endswith("/v1") else f"{host}/v1"
+        else:
+            base_url = "http://localhost:8080/v1"
     return OpenAI(api_key=api_key, base_url=base_url)
 
 
@@ -92,10 +100,10 @@ def _chat_completion(messages: list[dict[str, str]]) -> Any:
         ) from error
     except APIConnectionError as error:
         raise RuntimeError(
-            "Cannot connect to Bifrost. Check that BIFROST_BASE_URL points to a "
-            "running endpoint reachable by this app and ends in /v1. On Render, "
-            "do not use localhost; Bifrost must be deployed at a network-accessible "
-            "URL."
+            "Cannot connect to Bifrost. Check that BIFROST_HOST or "
+            "BIFROST_BASE_URL points to a running endpoint reachable by this app. "
+            "On Render, Bifrost must be deployed at a network-accessible URL; "
+            "do not use localhost."
         ) from error
     except OpenAIError as primary_error:
         LOGGER.warning(
