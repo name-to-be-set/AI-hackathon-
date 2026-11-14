@@ -2,7 +2,7 @@ envVarGroups:
   - name: bifrost-shared-auth
     envVars:
       - key: BIFROST_API_KEY
-        sync: false
+        generateValue: true
 
 services:
   - type: web
@@ -17,10 +17,8 @@ services:
         sync: false
       - fromGroup: bifrost-shared-auth
       - key: BIFROST_HOST
-        fromService:
-          type: web
-          name: bifrost-gateway
-          property: host
+        sync: false
+
   - type: web
     name: bifrost-gateway
     runtime: docker
