@@ -7,7 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from dotenv import load_dotenv
-from openai import AuthenticationError, OpenAI, OpenAIError
+from openai import APIConnectionError, AuthenticationError, OpenAI, OpenAIError
 from requests.exceptions import RequestException
 from tavily import (
     BadRequestError,
@@ -89,6 +89,13 @@ def _chat_completion(messages: list[dict[str, str]]) -> Any:
         raise RuntimeError(
             "Bifrost rejected BIFROST_API_KEY. Check that the virtual key is valid "
             "and permits the configured models."
+        ) from error
+    except APIConnectionError as error:
+        raise RuntimeError(
+            "Cannot connect to Bifrost. Check that BIFROST_BASE_URL points to a "
+            "running endpoint reachable by this app and ends in /v1. On Render, "
+            "do not use localhost; Bifrost must be deployed at a network-accessible "
+            "URL."
         ) from error
     except OpenAIError as primary_error:
         LOGGER.warning(

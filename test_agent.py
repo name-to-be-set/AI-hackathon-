@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import agent
-from openai import OpenAIError
+from openai import APIConnectionError, OpenAIError
 
 
 class AgentTests(unittest.TestCase):
@@ -477,6 +477,24 @@ class AgentTests(unittest.TestCase):
 
         self.assertEqual(response, "backup response")
         self.assertEqual(completions.models, [agent.MODEL, agent.FALLBACK_MODEL])
+
+    def test_chat_completion_reports_unreachable_bifrost_without_model_retry(self):
+        create = Mock(side_effect=APIConnectionError(request=None))
+        client = SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+        )
+
+        with (
+            patch("agent._get_llm_client", return_value=client),
+            self.assertRaisesRegex(RuntimeError, "BIFROST_BASE_URL") as error,
+        ):
+            agent._chat_completion([{"role": "user", "content": "test"}])
+
+        self.assertIn("do not use localhost", str(error.exception))
+        create.assert_called_once_with(
+            model=agent.MODEL,
+            messages=[{"role": "user", "content": "test"}],
+        )
 
     def test_transcribe_audio_uses_bifrost_and_returns_recognized_text(self):
         create = Mock(return_value=SimpleNamespace(text="Hello there"))
