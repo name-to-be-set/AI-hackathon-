@@ -1,0 +1,77 @@
+{
+  "$schema": "https://www.getbifrost.ai/schema",
+  "encryption_key": "env.BIFROST_ENCRYPTION_KEY",
+  "setup_token": "env.BIFROST_SETUP_TOKEN",
+  "client": {
+    "enable_logging": false,
+    "enforce_auth_on_inference": true
+  },
+  "config_store": {
+    "enabled": false
+  },
+  "logs_store": {
+    "enabled": false
+  },
+  "providers": {
+    "groq": {
+      "keys": [
+        {
+          "id": "groq-primary",
+          "name": "groq-primary",
+          "value": "env.GROQ_API_KEY",
+          "models": ["*"],
+          "weight": 1.0
+        }
+      ]
+    },
+    "gemini": {
+      "keys": [
+        {
+          "id": "gemini-primary",
+          "name": "gemini-primary",
+          "value": "env.GEMINI_API_KEY",
+          "models": ["*"],
+          "weight": 1.0
+        }
+      ]
+    }
+  },
+  "governance": {
+    "auth_config": {
+      "is_enabled": true,
+      "admin_username": "env.BIFROST_ADMIN_USERNAME",
+      "admin_password": "env.BIFROST_ADMIN_PASSWORD"
+    },
+    "virtual_keys": [
+      {
+        "id": "research-assistant",
+        "name": "Research Assistant",
+        "value": "env.BIFROST_API_KEY",
+        "is_active": true,
+        "provider_configs": [
+          {
+            "provider": "groq",
+            "weight": 1.0,
+            "allowed_models": ["*"],
+            "key_ids": ["groq-primary"]
+          },
+          {
+            "provider": "gemini",
+            "weight": 1.0,
+            "allowed_models": ["*"],
+            "key_ids": ["gemini-primary"]
+          }
+        ]
+      }
+    ]
+  },
+  "plugins": [
+    {
+      "name": "governance",
+      "enabled": true,
+      "config": {
+        "is_vk_mandatory": true
+      }
+    }
+  ]
+}

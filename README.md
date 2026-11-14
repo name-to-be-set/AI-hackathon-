@@ -123,20 +123,32 @@ cannot repair a missing or invalid provider key.
 
 ## Deploy for a hackathon (Render)
 
-The repository includes a Render Blueprint in `render.yaml`. Push the project
-to GitHub, create a new Blueprint in Render from that repository, then set the
-requested environment variables:
+The Render Blueprint in `render.yaml` defines the Streamlit app and a separate
+Bifrost web service. Push the repository to GitHub and create or update the
+Blueprint in Render. Bifrost uses the pinned official Docker image and a
+read-only configuration in `bifrost/config.json`; provider credentials and
+virtual-key values are supplied through Render environment settings, not Git.
 
 - `TAVILY_API_KEY`: your Tavily API key.
-- `BIFROST_API_KEY`: a Bifrost virtual key with access to the configured models.
-- `BIFROST_BASE_URL`: the reachable Bifrost endpoint ending in `/v1`.
+- `GROQ_API_KEY` and `GEMINI_API_KEY`: provider credentials for Bifrost.
+- `BIFROST_API_KEY`: a new Bifrost virtual key, shared by the app and Bifrost.
+- `BIFROST_BASE_URL`: the Bifrost public URL ending in `/v1`, such as
+  `https://bifrost-gateway.onrender.com/v1`. Use the actual URL shown by Render.
 
-The app and Bifrost must both be reachable from Render. Do not use
-`http://localhost:8080/v1` for a separately hosted Bifrost instance; `localhost`
-would refer to the Render app container. Keep provider credentials in Render's
-environment settings, not in Git or the repository's `.env` file. The
-`BIFROST_IMAGE_MODEL` and `BIFROST_TRANSCRIPTION_MODEL` settings are optional;
-configure them only if those features are enabled for your Bifrost key.
+The free Bifrost service has a public URL, so inference authentication and
+dashboard authentication are enabled. The Blueprint shares the virtual key
+through a Render environment-variable group; set a fresh `sk-bf-` key there
+and do not reuse any key exposed elsewhere. Render generates the Bifrost admin
+password, setup token, and encryption key. Keep all provider credentials in
+Render's environment settings, never in Git or the repository's `.env` file.
+
+Free Render services sleep after 15 minutes without traffic and can take about
+a minute to wake. Bifrost's file-only configuration is restored at startup, but
+its dashboard configuration is read-only; change providers or virtual keys in
+`bifrost/config.json` and redeploy. For local development, keep using
+`http://localhost:8080/v1`. The `BIFROST_IMAGE_MODEL` and
+`BIFROST_TRANSCRIPTION_MODEL` settings are optional; configure them only if
+those features are enabled for your Bifrost key.
 
 The Blueprint runs Streamlit on Render's assigned port. The free instance may
 sleep when idle, so allow a short startup delay when opening the demo. The app

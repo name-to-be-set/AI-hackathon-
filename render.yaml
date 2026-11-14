@@ -1,3 +1,9 @@
+envVarGroups:
+  - name: bifrost-shared-auth
+    envVars:
+      - key: BIFROST_API_KEY
+        sync: false
+
 services:
   - type: web
     name: ai-research-assistant
@@ -9,7 +15,32 @@ services:
     envVars:
       - key: TAVILY_API_KEY
         sync: false
-      - key: BIFROST_API_KEY
-        sync: false
+      - fromGroup: bifrost-shared-auth
       - key: BIFROST_BASE_URL
         sync: false
+  - type: web
+    name: bifrost-gateway
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile.bifrost
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: bifrost-shared-auth
+      - key: APP_HOST
+        value: 0.0.0.0
+      - key: APP_PORT
+        value: "10000"
+      - key: PORT
+        value: "10000"
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: BIFROST_ADMIN_USERNAME
+        value: bifrost-admin
+      - key: BIFROST_ADMIN_PASSWORD
+        generateValue: true
+      - key: BIFROST_SETUP_TOKEN
+        generateValue: true
+      - key: BIFROST_ENCRYPTION_KEY
+        generateValue: true
