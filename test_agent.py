@@ -40,6 +40,7 @@ class AgentTests(unittest.TestCase):
                 {
                     "BIFROST_API_KEY": "test-key",
                     "BIFROST_HOST": "bifrost-gateway.onrender.com",
+                    "BIFROST_BASE_URL": "https://stale-host.example/v1",
                 },
                 clear=True,
             ),

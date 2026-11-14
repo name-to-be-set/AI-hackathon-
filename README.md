@@ -140,7 +140,8 @@ and do not reuse any key exposed elsewhere. Render generates the Bifrost admin
 password, setup token, and encryption key. Keep all provider credentials in
 Render's environment settings, never in Git or the repository's `.env` file.
 The Blueprint syncs the Bifrost service hostname to the app automatically; the
-app derives its HTTPS `/v1` URL from that hostname. No manual URL copy is needed.
+app derives its HTTPS `/v1` URL from that hostname, even if an old
+`BIFROST_BASE_URL` value remains set. No manual URL copy is needed.
 
 Free Render services sleep after 15 minutes without traffic and can take about
 a minute to wake. Bifrost's file-only configuration is restored at startup, but

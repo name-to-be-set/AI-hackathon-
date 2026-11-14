@@ -51,15 +51,13 @@ def _get_llm_client() -> OpenAI:
     api_key = os.getenv("BIFROST_API_KEY")
     if not api_key:
         raise RuntimeError("BIFROST_API_KEY is missing from the environment.")
-    base_url = os.getenv("BIFROST_BASE_URL")
-    if not base_url:
-        host = os.getenv("BIFROST_HOST", "").strip().rstrip("/")
-        if host:
-            if not host.startswith(("http://", "https://")):
-                host = f"https://{host}"
-            base_url = host if host.endswith("/v1") else f"{host}/v1"
-        else:
-            base_url = "http://localhost:8080/v1"
+    host = os.getenv("BIFROST_HOST", "").strip().rstrip("/")
+    if host:
+        if not host.startswith(("http://", "https://")):
+            host = f"https://{host}"
+        base_url = host if host.endswith("/v1") else f"{host}/v1"
+    else:
+        base_url = os.getenv("BIFROST_BASE_URL") or "http://localhost:8080/v1"
     return OpenAI(api_key=api_key, base_url=base_url)
 
 
