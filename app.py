@@ -1,16 +1,10 @@
 
 import base64
 import html
-import json
-import os
 import random
 import re
-import sqlite3
-import uuid
-from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime
 from io import BytesIO
-from pathlib import Path
 
 import streamlit as st
 from openai import OpenAIError
@@ -22,12 +16,6 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
 from agent import run_research, transcribe_audio
 
-CHAT_DB_PATH = Path(
-    os.getenv(
-        "CHAT_DB_PATH",
-        str(Path.home() / ".ai_research_assistant" / "chats.sqlite3"),
-    )
-)
 CHAT_PLACEHOLDERS = (
     "Ask me anything...",
     "What's on your mind?",
@@ -37,80 +25,10 @@ CHAT_PLACEHOLDERS = (
 MAX_REQUESTS_PER_SESSION = 10
 
 
-def _connect_chat_store() -> sqlite3.Connection:
-    CHAT_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(CHAT_DB_PATH)
-    connection.row_factory = sqlite3.Row
-    return connection
-
-
-def _initialize_chat_store() -> None:
-    with closing(_connect_chat_store()) as connection, connection:
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS chats (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                messages TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-            """
-        )
-
-
-def _save_chat(chat_id: str, messages: list[dict]) -> None:
-    title = next(
-        (
-            message["content"].strip().replace("\n", " ")[:48]
-            for message in messages
-            if message.get("role") == "user"
-            and isinstance(message.get("content"), str)
-        ),
-        "New chat",
-    )
-    with closing(_connect_chat_store()) as connection, connection:
-        connection.execute(
-            """
-            INSERT INTO chats (id, title, messages, updated_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                title = excluded.title,
-                messages = excluded.messages,
-                updated_at = excluded.updated_at
-            """,
-            (
-                chat_id,
-                title,
-                json.dumps(messages),
-                datetime.now(timezone.utc).isoformat(),
-            ),
-        )
-
-
-def _load_chats() -> list[sqlite3.Row]:
-    with closing(_connect_chat_store()) as connection, connection:
-        return connection.execute(
-            "SELECT id, title FROM chats WHERE messages != '[]' "
-            "ORDER BY updated_at DESC"
-        ).fetchall()
-
-
-def _load_chat(chat_id: str) -> list[dict]:
-    with closing(_connect_chat_store()) as connection, connection:
-        row = connection.execute(
-            "SELECT messages FROM chats WHERE id = ?",
-            (chat_id,),
-        ).fetchone()
-    return json.loads(row["messages"]) if row else []
-
-
 def _start_new_chat() -> None:
-    chat_id = uuid.uuid4().hex
-    st.session_state["chat_id"] = chat_id
     st.session_state["messages"] = []
     st.session_state["greeting"] = _time_greeting()
     st.session_state.pop("share_message", None)
-    _save_chat(chat_id, [])
 
 
 def _time_greeting(hour: int | None = None) -> str:
@@ -207,8 +125,6 @@ def _render_images(images: object) -> None:
 def _render_reply_actions(
     message: dict,
     key_prefix: str,
-    chat_id: str | None = None,
-    messages: list[dict] | None = None,
 ) -> None:
     result = message.get("result")
     report = result.get("report") if isinstance(result, dict) else message.get("error")
@@ -238,8 +154,6 @@ def _render_reply_actions(
                 message["feedback"] = (
                     "none" if message.get("feedback") == "like" else "like"
                 )
-                if chat_id and messages is not None:
-                    _save_chat(chat_id, messages)
                 st.rerun()
         with dislike_column:
             if st.button(
@@ -256,8 +170,6 @@ def _render_reply_actions(
                 message["feedback"] = (
                     "none" if message.get("feedback") == "dislike" else "dislike"
                 )
-                if chat_id and messages is not None:
-                    _save_chat(chat_id, messages)
                 st.rerun()
         with share_column:
             if st.button(
@@ -436,8 +348,6 @@ def _render_conversation(messages: list[dict]) -> None:
             _render_reply_actions(
                 message,
                 key_prefix=f"chat_{index}",
-                chat_id=st.session_state["chat_id"],
-                messages=messages,
             )
 
 
@@ -590,9 +500,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-_initialize_chat_store()
-if "chat_id" not in st.session_state:
-    _start_new_chat()
 if "greeting" not in st.session_state:
     st.session_state["greeting"] = _time_greeting()
 if "chat_placeholder" not in st.session_state:
@@ -600,27 +507,11 @@ if "chat_placeholder" not in st.session_state:
 st.session_state.setdefault("demo_requests_used", 0)
 
 with st.sidebar:
-    st.markdown("### Chats")
+    st.markdown("### This session")
     st.caption(
         f"{MAX_REQUESTS_PER_SESSION - st.session_state['demo_requests_used']} "
         "demo requests remaining"
     )
-    for saved_chat in _load_chats():
-        if st.button(
-            saved_chat["title"],
-            key=f"load_chat_{saved_chat['id']}",
-            use_container_width=True,
-            type=(
-                "primary"
-                if saved_chat["id"] == st.session_state["chat_id"]
-                else "tertiary"
-            ),
-        ):
-            st.session_state["chat_id"] = saved_chat["id"]
-            st.session_state["messages"] = _load_chat(saved_chat["id"])
-            st.session_state["greeting"] = _time_greeting()
-            st.session_state.pop("share_message", None)
-            st.rerun()
 
 title_column, new_chat_column = st.columns([0.95, 0.05])
 with title_column:
@@ -671,7 +562,6 @@ if prompt := st.chat_input(
         if topic:
             conversation_history = _conversation_history(messages)
             messages.append({"role": "user", "content": topic})
-            _save_chat(st.session_state["chat_id"], messages)
             with st.chat_message("user"):
                 st.markdown(topic)
 
@@ -716,5 +606,4 @@ if prompt := st.chat_input(
                             assistant_message["result"] = result
 
             messages.append(assistant_message)
-            _save_chat(st.session_state["chat_id"], messages)
             st.rerun()

@@ -104,13 +104,13 @@ may offer a concise suggestion when useful, with a compact **Thinking**
 disclosure for progress updates.
 The composer includes microphone dictation; recordings are sent to the configured
 Bifrost transcription model and inserted as text before the message is handled.
-Chats are saved locally in `~/.ai_research_assistant/chats.sqlite3` and appear
-in the expandable chat-history sidebar. Set `CHAT_DB_PATH` to choose another
-database location. Replies include horizontal like/dislike, share, and copy
-controls after the first response; feedback is saved with each chat. Replies
-can also be downloaded as PDFs. Research reports have a Markdown download and
-a **Sources** section; inline source numbers are omitted from the displayed
-report.
+Chats are kept only in the active Streamlit session and are not saved to a
+local database or restored in a new session. Database files created by older
+versions are left untouched and are no longer accessed. Replies include
+horizontal like/dislike, share, and copy controls after the first response;
+feedback stays with the reply for the active session. Replies can also be
+downloaded as PDFs. Research reports have a Markdown download and a **Sources**
+section; inline source numbers are omitted from the displayed report.
 
 Search results show at most one image, and only for image- or person-focused
 questions. To generate images directly, set `BIFROST_IMAGE_MODEL` to an image
@@ -139,12 +139,10 @@ environment settings, not in Git or the repository's `.env` file. The
 configure them only if those features are enabled for your Bifrost key.
 
 The Blueprint runs Streamlit on Render's assigned port. The free instance may
-sleep when idle, so allow a short startup delay when opening the demo. Local
-chat history uses SQLite on the app's filesystem and is not durable across
-instance replacement or redeploy; that is usually acceptable for a hackathon
-demo. The app allows up to 10 submitted messages per Streamlit session. This
-helps limit accidental demo usage, but a new session resets the count and it is
-not a provider billing limit; configure provider-side quotas separately.
+sleep when idle, so allow a short startup delay when opening the demo. The app
+allows up to 10 submitted messages per Streamlit session. This helps limit
+accidental demo usage, but a new session resets the count and it is not a
+provider billing limit; configure provider-side quotas separately.
 
 ## Tests
 
