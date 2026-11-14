@@ -65,6 +65,40 @@ class AppTests(unittest.TestCase):
             any("Research could not be completed" in item.value for item in app.error)
         )
 
+    def test_followup_search_reuses_session_and_replaces_report(self):
+        first_result = {
+            "report": "# First report",
+            "sources": [],
+        }
+        second_result = {
+            "report": "# Second report",
+            "sources": [],
+        }
+        with patch(
+            "agent.run_research",
+            side_effect=[first_result, second_result],
+        ) as research:
+            app = AppTest.from_file(APP_FILE).run()
+            app.text_input(key="topic").set_value("first topic").run()
+            app.button(key="start_research").click().run()
+
+            self.assertTrue(
+                any("First report" in element.value for element in app.markdown)
+            )
+            app.text_input(key="next_topic").set_value("second topic").run()
+            app.button(key="next_research").click().run()
+
+        self.assertEqual(
+            [call.args[0] for call in research.call_args_list],
+            ["first topic", "second topic"],
+        )
+        self.assertTrue(
+            any("Second report" in element.value for element in app.markdown)
+        )
+        self.assertFalse(
+            any("First report" in element.value for element in app.markdown)
+        )
+
     def test_empty_topic_shows_prompt(self):
         app = AppTest.from_file(APP_FILE).run()
         app.button[0].click().run()

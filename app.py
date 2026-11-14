@@ -33,16 +33,25 @@ EXAMPLE_PROMPTS = (
 
 def _choose_prompt(prompt: str) -> None:
     st.session_state["topic"] = prompt
+    st.session_state["next_topic"] = ""
     st.session_state.pop("research_result", None)
     st.session_state.pop("research_error", None)
     st.session_state.pop("research_error_detail", None)
+    st.session_state.pop("search_requested", None)
 
 
 def _reset_research() -> None:
     st.session_state["topic"] = ""
+    st.session_state["next_topic"] = ""
     st.session_state.pop("research_result", None)
     st.session_state.pop("research_error", None)
     st.session_state.pop("research_error_detail", None)
+    st.session_state.pop("search_requested", None)
+
+
+def _submit_followup() -> None:
+    st.session_state["topic"] = st.session_state.get("next_topic", "")
+    st.session_state["search_requested"] = True
 
 
 def _render_result(result: dict) -> None:
@@ -102,8 +111,87 @@ def _render_result(result: dict) -> None:
 
 
 st.set_page_config(page_title="AI Research Assistant", layout="wide")
-st.title("AI Research Assistant")
-st.write("Turn a topic into a sourced research report.")
+
+st.markdown(
+    """
+    <style>
+    .stApp {
+        background: linear-gradient(135deg, #f5f7ff 0%, #eef8ff 40%, #f8f9ff 100%);
+    }
+    .stApp [data-testid="stHeader"] {
+        background: rgba(255, 255, 255, 0.25);
+    }
+    div[data-testid="stTextInput"] > div {
+        border-radius: 999px;
+        box-shadow: 0 14px 30px rgba(79, 70, 229, 0.12);
+        border: 1px solid rgba(99, 102, 241, 0.18);
+        background: rgba(255, 255, 255, 0.95);
+        overflow: hidden;
+    }
+    div[data-testid="stTextInput"] input {
+        font-size: 1.08rem;
+        padding: 1rem 1.1rem;
+        border: none;
+        background: transparent;
+        color: #1f2937;
+        min-height: 3rem;
+    }
+    div[data-testid="stTextInput"] input::placeholder {
+        color: #6b7280;
+    }
+    div[data-testid="stTextInput"] label {
+        font-weight: 700;
+        color: #312e81;
+        letter-spacing: 0.02em;
+    }
+    div[data-testid="stButton"] > button {
+        border-radius: 14px;
+        font-weight: 700;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    div[data-testid="stButton"] > button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 8px 20px rgba(79, 70, 229, 0.18);
+    }
+    div[data-testid="stButton"] button[kind="primary"] {
+        background: linear-gradient(135deg, #4f46e5, #7c3aed);
+        border: none;
+        color: white;
+        min-height: 3.1rem;
+        border-radius: 50%;
+        width: 3.1rem;
+        min-width: 3.1rem;
+        height: 3.1rem;
+        padding: 0;
+        font-size: 1.3rem;
+    }
+    div[data-testid="stButton"] button[kind="secondary"] {
+        background: rgba(255,255,255,0.7);
+        border: 1px solid rgba(99,102,241,0.15);
+        color: #4338ca;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    """
+    <div style="padding: 2rem 0 1rem;">
+      <div style="font-size: 0.9rem; font-weight: 700; color: #6366f1;
+                  text-transform: uppercase; letter-spacing: 0.12em;">
+        Your research assistant
+      </div>
+      <h1 style="margin: 0.4rem 0; color: #1f2450;">
+        Hello! What would you like to explore?
+      </h1>
+      <p style="font-size: 1.1rem; color: #5b6178; margin-bottom: 0;">
+        Ask a question and get a clear report backed by web sources.
+      </p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 with st.sidebar:
     st.header("Example prompts")
@@ -116,18 +204,21 @@ with st.sidebar:
             use_container_width=True,
         )
 
-topic = st.text_input(
-    "What would you like to research?",
-    key="topic",
-    placeholder="For example: Compare the leading approaches to grid-scale energy storage",
-)
-
-start_column, reset_column = st.columns([3, 1])
-with start_column:
+st.caption("What would you like to research?")
+search_column, submit_column, reset_column = st.columns([12, 1, 1])
+with search_column:
+    topic = st.text_input(
+        "Research search",
+        key="topic",
+        placeholder="Search a topic, question, or idea...",
+        label_visibility="collapsed",
+    )
+with submit_column:
     start_clicked = st.button(
-        "Start Research",
+        "➜",
         key="start_research",
         type="primary",
+        help="Search",
         use_container_width=True,
     )
 with reset_column:
@@ -137,6 +228,9 @@ with reset_column:
         on_click=_reset_research,
         use_container_width=True,
     )
+
+followup_clicked = st.session_state.pop("search_requested", False)
+start_clicked = start_clicked or followup_clicked
 
 if start_clicked:
     st.session_state.pop("research_result", None)
@@ -178,5 +272,24 @@ if error := st.session_state.get("research_error"):
 
 if result := st.session_state.get("research_result"):
     _render_result(result)
+    st.divider()
+    st.subheader("What would you like to research next?")
+    next_search_column, next_submit_column = st.columns([12, 1])
+    with next_search_column:
+        st.text_input(
+            "Next research search",
+            key="next_topic",
+            placeholder="Ask another question...",
+            label_visibility="collapsed",
+        )
+    with next_submit_column:
+        st.button(
+            "➜",
+            key="next_research",
+            type="primary",
+            help="Search again",
+            use_container_width=True,
+            on_click=_submit_followup,
+        )
 
 st.caption("Built with Streamlit, Tavily, and Bifrost.")
