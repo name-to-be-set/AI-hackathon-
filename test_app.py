@@ -359,6 +359,16 @@ class AppTests(unittest.TestCase):
         self.assertIn("width: 32px;", styles)
         self.assertIn("height: 32px;", styles)
 
+    def test_like_and_dislike_icons_have_white_fill(self):
+        app = AppTest.from_file(APP_FILE).run()
+
+        styles = "\n".join(element.value for element in app.markdown)
+        self.assertIn(
+            'div[class*="_actions"] button span[data-testid="stIconMaterial"]',
+            styles,
+        )
+        self.assertIn('font-variation-settings: "FILL" 1;', styles)
+
 
 if __name__ == "__main__":
     unittest.main()

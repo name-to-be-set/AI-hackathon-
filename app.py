@@ -666,6 +666,11 @@ st.markdown(
         margin-top: -1rem;
     }
 
+    div[class*="_actions"] button span[data-testid="stIconMaterial"] {
+        color: #ffffff;
+        font-variation-settings: "FILL" 1;
+    }
+
     div[data-testid="stChatMessage"] div[data-testid="stButton"] button {
         border-color: transparent;
         padding-inline: 0.4rem;
