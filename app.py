@@ -672,39 +672,39 @@ if prompt := st.chat_input(
                 ):
                     progress_line = st.empty()
 
-                    def update_progress(stage: str) -> None:
-                        progress_steps.append(stage)
-                        progress_line.caption(stage)
+                def update_progress(stage: str) -> None:
+                    progress_steps.append(stage)
+                    progress_line.caption(stage)
 
-                    try:
-                        result_container = {}
-                        st.write_stream(
-                            run_research_stream(
-                                topic,
-                                result_container,
-                                progress_callback=update_progress,
-                                conversation_history=conversation_history,
-                            )
+                try:
+                    result_container = {}
+                    st.write_stream(
+                        run_research_stream(
+                            topic,
+                            result_container,
+                            progress_callback=update_progress,
+                            conversation_history=conversation_history,
                         )
-                        result = result_container.get("result")
-                    except (OpenAIError, RuntimeError, TimeoutError, ValueError) as error:
-                        update_progress("The response could not be completed.")
+                    )
+                    result = result_container.get("result")
+                except (OpenAIError, RuntimeError, TimeoutError, ValueError) as error:
+                    update_progress("The response could not be completed.")
+                    assistant_message["error"] = (
+                        "The request could not be completed. Check the error details below."
+                    )
+                    assistant_message["error_detail"] = str(error)
+                else:
+                    if not isinstance(result, dict):
+                        update_progress("The service returned an unexpected response.")
                         assistant_message["error"] = (
-                            "The request could not be completed. Check the error details below."
+                            "The research service returned an unexpected response."
                         )
-                        assistant_message["error_detail"] = str(error)
+                    elif result.get("error"):
+                        update_progress("The response could not be completed.")
+                        assistant_message["error"] = str(result["error"])
                     else:
-                        if not isinstance(result, dict):
-                            update_progress("The service returned an unexpected response.")
-                            assistant_message["error"] = (
-                                "The research service returned an unexpected response."
-                            )
-                        elif result.get("error"):
-                            update_progress("The response could not be completed.")
-                            assistant_message["error"] = str(result["error"])
-                        else:
-                            update_progress("Response ready.")
-                            assistant_message["result"] = result
+                        update_progress("Response ready.")
+                        assistant_message["result"] = result
 
             messages.append(assistant_message)
             st.rerun()
