@@ -11,7 +11,7 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
-from openai import AuthenticationError, OpenAI, OpenAIError
+from openai import OpenAI, OpenAIError
 import requests
 from requests.exceptions import RequestException
 import streamlit as st
@@ -29,19 +29,13 @@ load_dotenv()
 MODEL = "openai/gpt-oss-20b"
 PLANNER_MODEL = "llama-3.1-8b-instant"
 GEMINI_MODEL = "gemini-2.5-flash"
-BIFROST_MODEL = "groq/openai/gpt-oss-20b"
-BIFROST_PLANNER_MODEL = "groq/llama-3.1-8b-instant"
-BIFROST_FALLBACK_MODEL = "gemini/gemini-3.6-flash"
 LLM_TIMEOUT_SECONDS = 30
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 LLM_UNAVAILABLE_MESSAGE = (
     "The AI service is temporarily unavailable. Please try again shortly."
 )
-TRANSCRIPTION_MODEL = os.getenv(
-    "BIFROST_TRANSCRIPTION_MODEL",
-    "groq/openai/whisper-large-v3-turbo",
-)
+TRANSCRIPTION_MODEL = "whisper-large-v3-turbo"
 IMAGE_MODEL = "gemini-2.5-flash-image"
 IMAGE_GENERATION_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
@@ -83,24 +77,6 @@ def _cached_tavily_search(
     )
 
 
-def _get_llm_client() -> OpenAI:
-    api_key = os.getenv("BIFROST_API_KEY")
-    if not api_key:
-        raise RuntimeError("BIFROST_API_KEY is missing from the environment.")
-    host = os.getenv("BIFROST_HOST", "").strip().rstrip("/")
-    if host:
-        if not host.startswith(("http://", "https://")):
-            host = f"https://{host}"
-        base_url = host if host.endswith("/v1") else f"{host}/v1"
-    else:
-        raise RuntimeError("BIFROST_HOST is missing from the environment.")
-    return OpenAI(
-        api_key=api_key,
-        base_url=base_url,
-        timeout=LLM_TIMEOUT_SECONDS,
-    )
-
-
 def transcribe_audio(audio_file: tuple[str, bytes, str]) -> str:
     """Transcribe a recorded audio file with Groq Whisper."""
     groq_api_key = os.getenv("GROQ_API_KEY")
@@ -113,7 +89,7 @@ def transcribe_audio(audio_file: tuple[str, bytes, str]) -> str:
     )
     try:
         response = client.audio.transcriptions.create(
-            model="whisper-large-v3-turbo",
+            model=TRANSCRIPTION_MODEL,
             file=audio_file,
             response_format="json",
         )
@@ -133,43 +109,7 @@ def call_llm(
     *,
     model: str = MODEL,
 ) -> Any:
-    """Call Bifrost when configured, otherwise use Groq with Gemini fallback."""
-    host = os.getenv("BIFROST_HOST", "").strip()
-    if host:
-        try:
-            client = _get_llm_client()
-        except RuntimeError as error:
-            LOGGER.warning("Bifrost client setup failed: %s", error)
-            raise RuntimeError(LLM_UNAVAILABLE_MESSAGE) from error
-        try:
-            return client.chat.completions.create(
-                model=(
-                    BIFROST_PLANNER_MODEL if model == PLANNER_MODEL else BIFROST_MODEL
-                ),
-                messages=messages,
-            )
-        except AuthenticationError as error:
-            LOGGER.warning("Bifrost authentication failed: %s", error)
-            raise RuntimeError(LLM_UNAVAILABLE_MESSAGE) from error
-        except (OpenAIError, TimeoutError) as primary_error:
-            LOGGER.warning("Bifrost model %s failed: %s", BIFROST_MODEL, primary_error)
-            try:
-                return client.chat.completions.create(
-                    model=(
-                        BIFROST_FALLBACK_MODEL
-                        if model == MODEL
-                        else "gemini/gemini-2.5-flash"
-                    ),
-                    messages=messages,
-                )
-            except (OpenAIError, TimeoutError) as fallback_error:
-                LOGGER.warning(
-                    "Bifrost fallback model %s failed: %s",
-                    BIFROST_FALLBACK_MODEL,
-                    fallback_error,
-                )
-                raise RuntimeError(LLM_UNAVAILABLE_MESSAGE) from fallback_error
-
+    """Call Groq directly, falling back to Gemini if Groq fails."""
     failures: list[Exception] = []
     groq_api_key = os.getenv("GROQ_API_KEY")
     if groq_api_key:
@@ -220,47 +160,6 @@ def stream_llm(
     model: str = MODEL,
 ) -> Iterator[str]:
     """Stream completion text, falling back from Groq to Gemini if needed."""
-    host = os.getenv("BIFROST_HOST", "").strip()
-    if host:
-        client = _get_llm_client()
-        bifrost_model = (
-            BIFROST_PLANNER_MODEL if model == PLANNER_MODEL else BIFROST_MODEL
-        )
-        fallback_model = (
-            BIFROST_FALLBACK_MODEL
-            if model == MODEL
-            else "gemini/gemini-2.5-flash"
-        )
-        for candidate_model in (bifrost_model, fallback_model):
-            yielded = False
-            try:
-                stream = client.chat.completions.create(
-                    model=candidate_model,
-                    messages=messages,
-                    stream=True,
-                )
-                for event in stream:
-                    try:
-                        content = event.choices[0].delta.content
-                    except (AttributeError, IndexError, TypeError):
-                        continue
-                    if isinstance(content, str) and content:
-                        yielded = True
-                        yield content
-                return
-            except AuthenticationError as error:
-                LOGGER.warning("Bifrost streaming authentication failed: %s", error)
-                raise RuntimeError(LLM_UNAVAILABLE_MESSAGE) from error
-            except (OpenAIError, TimeoutError) as error:
-                LOGGER.warning(
-                    "Bifrost streaming model %s failed: %s",
-                    candidate_model,
-                    error,
-                )
-                if yielded:
-                    raise RuntimeError(LLM_UNAVAILABLE_MESSAGE) from error
-        raise RuntimeError(LLM_UNAVAILABLE_MESSAGE)
-
     groq_api_key = os.getenv("GROQ_API_KEY")
     if groq_api_key:
         try:

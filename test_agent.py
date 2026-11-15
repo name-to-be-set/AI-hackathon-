@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import agent
-from openai import APIConnectionError, OpenAIError
+from openai import OpenAIError
 from requests.exceptions import RequestException
 
 
@@ -15,51 +15,6 @@ class AgentTests(unittest.TestCase):
         return SimpleNamespace(
             choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
         )
-
-    def test_llm_client_uses_configured_bifrost_url(self):
-        with (
-            patch.dict(
-                "os.environ",
-                {
-                    "BIFROST_API_KEY": "test-key",
-                    "BIFROST_HOST": "https://gateway.example/v1",
-                },
-                clear=True,
-            ),
-            patch("agent.OpenAI") as openai,
-        ):
-            agent._get_llm_client()
-
-        openai.assert_called_once_with(
-            api_key="test-key",
-            base_url="https://gateway.example/v1",
-            timeout=30,
-        )
-
-    def test_llm_client_builds_url_from_render_bifrost_host(self):
-        with (
-            patch.dict(
-                "os.environ",
-                {
-                    "BIFROST_API_KEY": "test-key",
-                    "BIFROST_HOST": "bifrost-gateway.onrender.com",
-                },
-                clear=True,
-            ),
-            patch("agent.OpenAI") as openai,
-        ):
-            agent._get_llm_client()
-
-        openai.assert_called_once_with(
-            api_key="test-key",
-            base_url="https://bifrost-gateway.onrender.com/v1",
-            timeout=30,
-        )
-
-    def test_llm_client_requires_a_configured_url(self):
-        with patch.dict("os.environ", {"BIFROST_API_KEY": "test-key"}, clear=True):
-            with self.assertRaisesRegex(RuntimeError, "BIFROST_HOST is missing"):
-                agent._get_llm_client()
 
     def test_empty_topic_returns_contract_without_api_calls(self):
         result = agent.run_research("  ")
@@ -692,8 +647,8 @@ class AgentTests(unittest.TestCase):
 
         self.assertNotIn("private provider details", str(error.exception))
 
-    def test_call_llm_uses_bifrost_when_host_is_configured(self):
-        create = Mock(return_value="Bifrost response")
+    def test_call_llm_ignores_stale_bifrost_settings(self):
+        create = Mock(return_value="Groq response")
         client = SimpleNamespace(
             chat=SimpleNamespace(completions=SimpleNamespace(create=create))
         )
@@ -703,47 +658,28 @@ class AgentTests(unittest.TestCase):
             patch.dict(
                 "os.environ",
                 {
+                    "GROQ_API_KEY": "groq-test",
                     "BIFROST_HOST": "bifrost.example",
                     "BIFROST_API_KEY": "bifrost-test",
                 },
                 clear=True,
             ),
-            patch("agent._get_llm_client", return_value=client),
+            patch("agent.OpenAI", return_value=client) as openai,
         ):
             response = agent.call_llm(messages)
 
-        self.assertEqual(response, "Bifrost response")
+        self.assertEqual(response, "Groq response")
+        openai.assert_called_once_with(
+            api_key="groq-test",
+            base_url=agent.GROQ_BASE_URL,
+            timeout=30,
+        )
         create.assert_called_once_with(
-            model=agent.BIFROST_MODEL,
+            model=agent.MODEL,
             messages=messages,
         )
 
-    def test_call_llm_retries_bifrost_fallback_and_shows_friendly_error(self):
-        create = Mock(side_effect=APIConnectionError(request=None))
-        client = SimpleNamespace(
-            chat=SimpleNamespace(completions=SimpleNamespace(create=create))
-        )
-
-        with (
-            patch.dict(
-                "os.environ",
-                {
-                    "BIFROST_HOST": "bifrost.example",
-                    "BIFROST_API_KEY": "bifrost-test",
-                },
-                clear=True,
-            ),
-            patch("agent._get_llm_client", return_value=client),
-            self.assertRaisesRegex(RuntimeError, agent.LLM_UNAVAILABLE_MESSAGE),
-        ):
-            agent.call_llm([{"role": "user", "content": "test"}])
-
-        self.assertEqual(
-            [call.kwargs["model"] for call in create.call_args_list],
-            [agent.BIFROST_MODEL, agent.BIFROST_FALLBACK_MODEL],
-        )
-
-    def test_transcribe_audio_uses_bifrost_and_returns_recognized_text(self):
+    def test_transcribe_audio_uses_groq_and_returns_recognized_text(self):
         create = Mock(return_value=SimpleNamespace(text="Hello there"))
         client = SimpleNamespace(
             audio=SimpleNamespace(
@@ -752,10 +688,18 @@ class AgentTests(unittest.TestCase):
         )
         audio_file = ("speech.wav", b"wav-audio", "audio/wav")
 
-        with patch("agent._get_llm_client", return_value=client):
+        with (
+            patch.dict("os.environ", {"GROQ_API_KEY": "groq-test"}),
+            patch("agent.OpenAI", return_value=client) as openai,
+        ):
             transcript = agent.transcribe_audio(audio_file)
 
         self.assertEqual(transcript, "Hello there")
+        openai.assert_called_once_with(
+            api_key="groq-test",
+            base_url=agent.GROQ_BASE_URL,
+            timeout=30,
+        )
         create.assert_called_once_with(
             model=agent.TRANSCRIPTION_MODEL,
             file=audio_file,
@@ -772,36 +716,41 @@ class AgentTests(unittest.TestCase):
         )
 
         with (
-            patch("agent._get_llm_client", return_value=client),
+            patch.dict("os.environ", {"GROQ_API_KEY": "groq-test"}),
+            patch("agent.OpenAI", return_value=client),
             self.assertRaisesRegex(RuntimeError, "No speech was recognized"),
         ):
             agent.transcribe_audio(("silence.wav", b"wav-audio", "audio/wav"))
 
-    def test_call_llm_reports_bifrost_authentication_failure(self):
-        class FakeAuthenticationError(OpenAIError):
-            pass
-
-        class FakeCompletions:
-            def create(self, model, messages):
-                raise FakeAuthenticationError("unauthorized")
-
+    def test_stream_llm_ignores_stale_bifrost_settings(self):
+        event = SimpleNamespace(
+            choices=[SimpleNamespace(delta=SimpleNamespace(content="Groq chunk"))]
+        )
         client = SimpleNamespace(
-            chat=SimpleNamespace(completions=FakeCompletions())
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=Mock(return_value=iter([event])))
+            )
         )
         with (
             patch.dict(
                 "os.environ",
                 {
+                    "GROQ_API_KEY": "groq-test",
                     "BIFROST_HOST": "bifrost.example",
                     "BIFROST_API_KEY": "bifrost-test",
                 },
                 clear=True,
             ),
-            patch("agent.AuthenticationError", FakeAuthenticationError),
-            patch("agent._get_llm_client", return_value=client),
+            patch("agent.OpenAI", return_value=client) as openai,
         ):
-            with self.assertRaisesRegex(RuntimeError, agent.LLM_UNAVAILABLE_MESSAGE):
-                agent.call_llm([{"role": "user", "content": "hello"}])
+            chunks = list(agent.stream_llm([{"role": "user", "content": "hello"}]))
+
+        self.assertEqual(chunks, ["Groq chunk"])
+        openai.assert_called_once_with(
+            api_key="groq-test",
+            base_url=agent.GROQ_BASE_URL,
+            timeout=30,
+        )
 
 
 if __name__ == "__main__":

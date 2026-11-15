@@ -9,10 +9,8 @@ or research, then searches and writes a report only when sources are needed.
 
 - **Streamlit** provides the chat UI, progress tracker, source cards, and
   report download.
-- **Bifrost** is an optional OpenAI-compatible gateway for the language models.
 - **Tavily** searches the web and returns source titles, URLs, and useful text.
-- When `BIFROST_HOST` is set, requests use Bifrost. Otherwise, the backend calls
-  Groq directly and falls back to Gemini if Groq fails.
+- The backend calls Groq directly and falls back to Gemini if Groq fails.
 - A fast model routes messages and plans up to three focused queries; the larger
   model streams the final research report. Tavily queries run concurrently,
   request at most three results each, and cache results for one hour.
@@ -71,22 +69,15 @@ Research results may include up to four image URLs and descriptions:
    TAVILY_API_KEY=your_tavily_api_key
    GROQ_API_KEY=your_groq_api_key
    GEMINI_API_KEY=your_gemini_api_key
-   # Optional: set both values to route requests through Bifrost instead.
-   BIFROST_HOST=
-   BIFROST_API_KEY=
-   # Optional; the default is groq/openai/whisper-large-v3-turbo
-   BIFROST_TRANSCRIPTION_MODEL=groq/openai/whisper-large-v3-turbo
    ```
 
    Keep the real values private. `.env` is ignored by Git; verify with
    `git check-ignore -v .env`. Never commit API keys or virtual keys.
-   For local Bifrost use, start a Bifrost gateway and set `BIFROST_HOST` and
-   `BIFROST_API_KEY` to its URL and virtual key.
 
 ## Run
 
 With provider credentials configured, start the app from the repository
-directory. Bifrost is only needed when `BIFROST_HOST` is set:
+directory:
 
 ```bash
 streamlit run app.py
@@ -101,9 +92,8 @@ search results. If the results do not contain the answer, the assistant says so
 rather than guessing. The assistant acts as a practical, supportive mentor and
 may offer a concise suggestion when useful, with a compact **Thinking**
 disclosure for progress updates.
-The composer includes microphone dictation; when Bifrost is configured,
-recordings are sent to its transcription model and inserted as text before the
-message is handled.
+The composer includes microphone dictation; recordings are transcribed with
+Groq and inserted as text before the message is handled.
 Chats are kept only in the active Streamlit session and are not saved to a
 local database or restored in a new session. Database files created by older
 versions are left untouched and are no longer accessed. Replies include
@@ -121,35 +111,20 @@ and appears once at the top of an empty chat. The layout adapts to mobile and
 desktop screen widths.
 
 If both direct providers fail, the app displays a friendly unavailable message.
-When using Bifrost, verify that `BIFROST_API_KEY` is valid and permits the
-configured models.
 
 ## Deploy for a hackathon (Render)
 
-The Render Blueprint in `render.yaml` defines the Streamlit app and an optional
-Bifrost web service. The app can call Groq and Gemini directly; leave
-`BIFROST_HOST` unset to use that mode. Push the repository to GitHub and create
-or update the Blueprint in Render. Provider credentials and virtual-key values
-are supplied through Render environment settings, not Git.
+The Render Blueprint in `render.yaml` defines the Streamlit app. Push the
+repository to GitHub and create or update the Blueprint in Render. Provider
+credentials are supplied through Render environment settings, not Git.
 
 - `TAVILY_API_KEY`: your Tavily API key.
 - `GROQ_API_KEY` and `GEMINI_API_KEY`: direct provider credentials for the app.
-- `BIFROST_HOST` and `BIFROST_API_KEY`: optional settings for Bifrost mode.
-
-The free Bifrost service has a public URL, so inference authentication and
-dashboard authentication are enabled. The Blueprint shares the virtual key
-through a Render environment-variable group; set a fresh `sk-bf-` key there
-and do not reuse any key exposed elsewhere. Render generates the Bifrost admin
-password, setup token, and encryption key. Keep all provider credentials in
-Render's environment settings, never in Git or the repository's `.env` file.
-Set `BIFROST_HOST` only when you want the app to route requests through the
-optional gateway; the app adds the OpenAI-compatible `/v1` path.
+Keep all provider credentials in Render's environment settings, never in Git
+or the repository's `.env` file.
 
 Free Render services sleep after 15 minutes without traffic and can take about
-a minute to wake. Bifrost's file-only configuration is restored at startup, but
-its dashboard configuration is read-only; change providers or virtual keys in
-`bifrost/config.json` and redeploy. The `BIFROST_TRANSCRIPTION_MODEL` setting is
-optional; configure it only if transcription is enabled for your Bifrost key.
+a minute to wake.
 
 The Blueprint runs Streamlit on Render's assigned port. The free instance may
 sleep when idle, so allow a short startup delay when opening the demo. The app
