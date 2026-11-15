@@ -1,6 +1,0 @@
-FROM docker.io/maximhq/bifrost:latest
-
-ENV APP_HOST=0.0.0.0
-ENV APP_PORT=10000
-
-COPY --chown=1000:1000 bifrost/config.json /app/data/config.json
