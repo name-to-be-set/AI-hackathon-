@@ -13,6 +13,19 @@ def _send_message(app: AppTest, message: str) -> None:
     app.chat_input[0].set_value(message).run()
 
 
+def _stream_response(result):
+    def stream(
+        topic,
+        result_container,
+        progress_callback=None,
+        conversation_history=None,
+    ):
+        result_container["result"] = result
+        yield result["report"]
+
+    return stream
+
+
 class AppTests(unittest.TestCase):
     def setUp(self):
         temporary_directory = tempfile.TemporaryDirectory()
@@ -48,6 +61,7 @@ class AppTests(unittest.TestCase):
 
         def fake_research(
             topic,
+            result_container,
             progress_callback=None,
             conversation_history=None,
         ):
@@ -60,9 +74,10 @@ class AppTests(unittest.TestCase):
             ):
                 progress_callback(stage)
                 stages.append(stage)
-            return result
+            result_container["result"] = result
+            yield result["report"]
 
-        with patch("agent.run_research", side_effect=fake_research) as research:
+        with patch("agent.run_research_stream", side_effect=fake_research) as research:
             app = AppTest.from_file(APP_FILE).run()
             greeting = app.session_state["greeting"]
             self.assertTrue(
@@ -99,7 +114,7 @@ class AppTests(unittest.TestCase):
                     for element in app.link_button
                 )
             )
-            self.assertEqual(len(app.image), 1)
+            self.assertEqual(len(app.image), 3)
             self.assertTrue(
                 all("[1]" not in element.value for element in app.markdown)
             )
@@ -140,7 +155,10 @@ class AppTests(unittest.TestCase):
             )
 
     def test_timeout_shows_friendly_error_without_traceback(self):
-        with patch("agent.run_research", side_effect=TimeoutError("simulated timeout")):
+        with patch(
+            "agent.run_research_stream",
+            side_effect=TimeoutError("simulated timeout"),
+        ):
             app = AppTest.from_file(APP_FILE).run()
             _send_message(app, "test topic")
 
@@ -150,7 +168,7 @@ class AppTests(unittest.TestCase):
         )
 
     def test_demo_request_limit_blocks_another_research_call(self):
-        with patch("agent.run_research") as research:
+        with patch("agent.run_research_stream") as research:
             app = AppTest.from_file(APP_FILE).run()
             app.session_state["demo_requests_used"] = 10
             _send_message(app, "one more request")
@@ -163,13 +181,13 @@ class AppTests(unittest.TestCase):
 
     def test_chat_is_only_available_in_the_current_session(self):
         with patch(
-            "agent.run_research",
-            return_value={
+            "agent.run_research_stream",
+            side_effect=_stream_response({
                 "kind": "chat",
                 "report": "Saved response",
                 "sources": [],
                 "images": [],
-            },
+            }),
         ):
             first_app = AppTest.from_file(APP_FILE).run()
             _send_message(first_app, "Remember this conversation")
@@ -240,6 +258,14 @@ class AppTests(unittest.TestCase):
                     "recordings are sent",
                 )
             )
+        )
+
+    def test_mobile_layout_has_a_small_screen_breakpoint(self):
+        app = AppTest.from_file(APP_FILE).run()
+
+        self.assertFalse(app.exception)
+        self.assertTrue(
+            any("@media (max-width: 640px)" in element.value for element in app.markdown)
         )
 
 

@@ -13,9 +13,12 @@ or research, then searches and writes a report only when sources are needed.
 - **Tavily** searches the web and returns source titles, URLs, and useful text.
 - When `BIFROST_HOST` is set, requests use Bifrost. Otherwise, the backend calls
   Groq directly and falls back to Gemini if Groq fails.
-- The model classifies each message before query generation. Chat and general
-  knowledge requests skip Tavily; research requests generate 3-4 focused
-  queries. Up to 10 previous user/assistant messages are used for follow-ups.
+- A fast model routes messages and plans up to three focused queries; the larger
+  model streams the final research report. Tavily queries run concurrently,
+  request at most three results each, and cache results for one hour.
+- Casual greetings skip routing and search and use one direct LLM call. Other
+  chat and general knowledge requests skip Tavily. Up to 10 previous
+  user/assistant messages are used for follow-ups.
 - Invalid routing JSON defaults to chat. Invalid query JSON is retried once,
   then the original user message is used as a single search query.
 
@@ -29,13 +32,15 @@ or research, then searches and writes a report only when sources are needed.
 ```
 
 Research source links are returned separately and displayed under **Sources**.
-The result may include one image URL for a visual or person-focused request:
+Research results may include up to four image URLs and descriptions:
 
 ```python
 {
     "report": "Markdown report or a short conversational reply",
     "sources": [{"title": "Source title", "url": "https://example.com"}],
-    "images": [{"url": "https://example.com/image.jpg", "description": "Caption"}],
+    "images": [
+        {"url": "https://example.com/image.jpg", "description": "Caption"},
+    ],
     "kind": "chat",  # only present for casual chat replies
 }
 ```
@@ -69,8 +74,6 @@ The result may include one image URL for a visual or person-focused request:
    # Optional: set both values to route requests through Bifrost instead.
    BIFROST_HOST=
    BIFROST_API_KEY=
-   # Optional; set a Bifrost image-generation model to enable generated images
-   BIFROST_IMAGE_MODEL=
    # Optional; the default is groq/openai/whisper-large-v3-turbo
    BIFROST_TRANSCRIPTION_MODEL=groq/openai/whisper-large-v3-turbo
    ```
@@ -109,10 +112,13 @@ feedback stays with the reply for the active session. Replies can also be
 downloaded as PDFs. Research reports have a Markdown download and a **Sources**
 section; inline source numbers are omitted from the displayed report.
 
-Search results show at most one image, and only for image- or person-focused
-questions. To generate images directly, set `BIFROST_IMAGE_MODEL` to an image
-generation model enabled for your Bifrost virtual key. Without it, image requests
-return a ready-to-use generation prompt instead.
+Research answers may show up to four Tavily images in a responsive row. Requests
+starting with image-generation commands such as “draw,” “generate image,” “create
+a picture,” or “make an image” use Gemini's `gemini-2.5-flash-image` model and
+fall back to Pollinations if Gemini is unavailable. The app uses `GEMINI_API_KEY`
+from `.env` or the deployment environment. The initial greeting uses India time
+and appears once at the top of an empty chat. The layout adapts to mobile and
+desktop screen widths.
 
 If both direct providers fail, the app displays a friendly unavailable message.
 When using Bifrost, verify that `BIFROST_API_KEY` is valid and permits the
@@ -142,9 +148,8 @@ optional gateway; the app adds the OpenAI-compatible `/v1` path.
 Free Render services sleep after 15 minutes without traffic and can take about
 a minute to wake. Bifrost's file-only configuration is restored at startup, but
 its dashboard configuration is read-only; change providers or virtual keys in
-`bifrost/config.json` and redeploy. The `BIFROST_IMAGE_MODEL` and
-`BIFROST_TRANSCRIPTION_MODEL` settings are optional; configure them only if
-those features are enabled for your Bifrost key.
+`bifrost/config.json` and redeploy. The `BIFROST_TRANSCRIPTION_MODEL` setting is
+optional; configure it only if transcription is enabled for your Bifrost key.
 
 The Blueprint runs Streamlit on Render's assigned port. The free instance may
 sleep when idle, so allow a short startup delay when opening the demo. The app

@@ -1,3 +1,4 @@
+import base64
 import json
 import unittest
 from types import SimpleNamespace
@@ -5,6 +6,7 @@ from unittest.mock import Mock, patch
 
 import agent
 from openai import APIConnectionError, OpenAIError
+from requests.exceptions import RequestException
 
 
 class AgentTests(unittest.TestCase):
@@ -77,7 +79,7 @@ class AgentTests(unittest.TestCase):
             '"third topic query"]'
         )
 
-        self.assertEqual(len(json_queries), 4)
+        self.assertEqual(len(json_queries), 3)
         self.assertEqual(len(queries_with_prefix), 3)
 
     def test_model_output_normalizes_html_breaks_and_bullet_characters(self):
@@ -91,11 +93,14 @@ class AgentTests(unittest.TestCase):
             "- Faithfulness (truthfulness)\n- Safety",
         )
 
-    def test_only_visual_or_person_focused_research_shows_search_images(self):
-        self.assertTrue(agent._should_display_image("Who is Ada Lovelace?"))
-        self.assertTrue(agent._should_display_image("Show me a photo of a red panda"))
-        self.assertTrue(agent._should_display_image("Tell me about Taylor Swift"))
-        self.assertFalse(agent._should_display_image("Compare current solar prices"))
+    def test_supported_image_creation_phrases_are_detected(self):
+        self.assertTrue(agent._is_image_creation_request("Draw a red panda"))
+        self.assertTrue(agent._is_image_creation_request("Generate an image of a city"))
+        self.assertTrue(agent._is_image_creation_request("Create a picture of a cat"))
+        self.assertTrue(agent._is_image_creation_request("Make an image of the moon"))
+        self.assertFalse(
+            agent._is_image_creation_request("Tell me about an image model")
+        )
 
     def test_search_continues_after_failure_and_removes_duplicate_urls(self):
         search_calls = []
@@ -146,6 +151,30 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(len(result["errors"]), 1)
         self.assertEqual(len(result["images"]), 1)
         self.assertTrue(all(call["include_images"] for call in search_calls))
+        self.assertTrue(
+            all(call["include_image_descriptions"] for call in search_calls)
+        )
+        self.assertTrue(all(call["max_results"] == 3 for call in search_calls))
+        self.assertTrue(all(call["search_depth"] == "basic" for call in search_calls))
+
+    def test_search_trims_result_text_to_six_hundred_characters(self):
+        response = {
+            "images": [],
+            "results": [
+                {
+                    "title": "Long source",
+                    "url": "https://example.com/long",
+                    "content": "x" * 900,
+                }
+            ],
+        }
+        with (
+            patch.dict("os.environ", {"TAVILY_API_KEY": "test-key"}),
+            patch("agent._cached_tavily_search", return_value=response),
+        ):
+            result = agent.search_web(["one query"])
+
+        self.assertEqual(len(result["text"].split("\n", 1)[1]), 600)
 
     def test_run_research_reports_progress_and_preserves_contract(self):
         progress = []
@@ -182,7 +211,7 @@ class AgentTests(unittest.TestCase):
             },
         )
 
-    def test_person_research_keeps_at_most_one_image(self):
+    def test_research_answers_include_web_images(self):
         search_results = {
             "text": "Biography details",
             "sources": [{"title": "Biography", "url": "https://example.com"}],
@@ -194,17 +223,17 @@ class AgentTests(unittest.TestCase):
         }
         with (
             patch("agent.route_intent", return_value="research"),
-            patch("agent.generate_queries", return_value=["Ada Lovelace biography"]),
+            patch("agent.generate_queries", return_value=["Compare solar prices"]),
             patch("agent.search_web", return_value=search_results) as search,
             patch("agent.write_report", return_value="A short biography."),
         ):
-            result = agent.run_research("Who is Ada Lovelace?")
+            result = agent.run_research("Compare current solar prices.")
 
         search.assert_called_once_with(
-            ["Ada Lovelace biography"],
+            ["Compare solar prices"],
             include_images=True,
         )
-        self.assertEqual(result["images"], search_results["images"][:1])
+        self.assertEqual(result["images"], search_results["images"])
 
     def test_chat_route_skips_search_and_asks_about_vague_requests(self):
         history = [{"role": "user", "content": "Hi there"}]
@@ -300,7 +329,7 @@ class AgentTests(unittest.TestCase):
         ):
             result = agent.run_research("Hello!")
 
-        route.assert_called_once()
+        route.assert_not_called()
         search.assert_not_called()
         self.assertEqual(completion.call_count, 1)
         self.assertIn(
@@ -363,7 +392,7 @@ class AgentTests(unittest.TestCase):
 
         search.assert_called_once_with(
             ["Find current solar energy prices."],
-            include_images=False,
+            include_images=True,
         )
         self.assertEqual(result["report"], "No sources found.")
 
@@ -393,51 +422,81 @@ class AgentTests(unittest.TestCase):
         with (
             patch(
                 "agent.call_llm",
-                side_effect=[
-                    self._completion('{"intent":"chat"}'),
-                    self._completion("A cozy watercolor cat..."),
-                ],
+                return_value=self._completion("A cozy watercolor cat..."),
             ) as completion,
+            patch(
+                "agent._generate_image",
+                return_value={
+                    "base64": "aW1hZ2U=",
+                    "mime_type": "image/png",
+                    "description": "Generated image",
+                },
+            ),
             patch("agent.search_web") as search,
         ):
             result = agent.run_research("Create an image of a cat reading a book.")
 
         search.assert_not_called()
-        system_prompt = completion.call_args_list[1].args[0][0]["content"]
+        system_prompt = completion.call_args.args[0][0]["content"]
         self.assertIn("image-generation prompt", system_prompt)
         self.assertEqual(result["kind"], "chat")
-        self.assertTrue(
-            result["report"].startswith("Direct image generation is not configured")
-        )
-        self.assertTrue(result["report"].endswith("Would you like any changes?"))
+        self.assertEqual(result["report"], "Here's the image you requested.")
+        self.assertEqual(completion.call_count, 1)
 
     def test_configured_image_model_returns_generated_image_data(self):
-        generate = Mock(
-            return_value=SimpleNamespace(
-                data=[SimpleNamespace(b64_json="aW1hZ2U=")]
-            )
-        )
-        client = SimpleNamespace(
-            images=SimpleNamespace(generate=generate),
-        )
+        response = Mock()
+        response.json.return_value = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "inlineData": {
+                                    "data": "aW1hZ2U=",
+                                    "mimeType": "image/png",
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
         with (
-            patch("agent.IMAGE_MODEL", "test-image-model"),
-            patch("agent._get_llm_client", return_value=client),
+            patch.dict("os.environ", {"GEMINI_API_KEY": "gemini-test"}),
+            patch("agent.requests.post", return_value=response) as post,
             patch(
                 "agent.call_llm",
-                side_effect=[
-                    self._completion('{"intent":"chat"}'),
-                    self._completion("A watercolor cat reading a book."),
-                ],
+                return_value=self._completion("A watercolor cat reading a book."),
             ),
         ):
             result = agent.run_research("Create an image of a cat reading a book.")
 
         self.assertEqual(result["images"][0]["base64"], "aW1hZ2U=")
-        generate.assert_called_once_with(
-            model="test-image-model",
-            prompt="A watercolor cat reading a book.",
-            size="1024x1024",
+        post.assert_called_once()
+        self.assertIn("gemini-2.5-flash-image", post.call_args.args[0])
+
+    def test_image_generation_falls_back_to_pollinations(self):
+        response = Mock()
+        response.headers = {"content-type": "image/png"}
+        response.content = b"pollinations-image"
+        with (
+            patch.dict("os.environ", {"GEMINI_API_KEY": "gemini-test"}),
+            patch(
+                "agent.requests.post",
+                side_effect=RequestException("Gemini quota exhausted"),
+            ),
+            patch("agent.requests.get", return_value=response) as pollinations,
+        ):
+            image = agent._generate_image("A small blue bird")
+
+        self.assertEqual(image["mime_type"], "image/png")
+        self.assertEqual(
+            base64.b64decode(image["base64"]),
+            b"pollinations-image",
+        )
+        self.assertIn(
+            "A%20small%20blue%20bird",
+            pollinations.call_args.args[0],
         )
 
     def test_report_prompt_is_supportive_and_answers_the_specific_question(self):
@@ -535,6 +594,75 @@ class AgentTests(unittest.TestCase):
         gemini_create.assert_called_once_with(
             model=agent.GEMINI_MODEL,
             messages=messages,
+        )
+
+    def test_stream_llm_uses_groq_streaming_and_falls_back_to_gemini(self):
+        messages = [{"role": "user", "content": "test"}]
+        event = SimpleNamespace(
+            choices=[SimpleNamespace(delta=SimpleNamespace(content="Gemini chunk"))]
+        )
+        groq_client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(
+                    create=Mock(side_effect=OpenAIError("Groq unavailable"))
+                )
+            )
+        )
+        gemini_create = Mock(return_value=iter([event]))
+        gemini_client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=gemini_create)
+            )
+        )
+
+        with (
+            patch.dict(
+                "os.environ",
+                {"GROQ_API_KEY": "groq-test", "GEMINI_API_KEY": "gemini-test"},
+                clear=True,
+            ),
+            patch("agent.OpenAI", side_effect=[groq_client, gemini_client]),
+        ):
+            chunks = list(agent.stream_llm(messages))
+
+        self.assertEqual(chunks, ["Gemini chunk"])
+        self.assertEqual(
+            groq_client.chat.completions.create.call_args.kwargs,
+            {"model": agent.MODEL, "messages": messages, "stream": True},
+        )
+        gemini_create.assert_called_once_with(
+            model=agent.GEMINI_MODEL,
+            messages=messages,
+            stream=True,
+        )
+
+    def test_run_research_stream_returns_the_existing_result_shape(self):
+        results = {
+            "sources": [{"title": "Source", "url": "https://example.com"}],
+            "images": [],
+        }
+        prepared = {
+            "topic": "A research topic",
+            "results": results,
+            "history": [],
+        }
+        result_container = {}
+        with (
+            patch("agent._prepare_response", return_value=prepared),
+            patch("agent.stream_report", return_value=iter(["A streamed ", "report."])),
+        ):
+            streamed = "".join(
+                agent.run_research_stream("A research topic", result_container)
+            )
+
+        self.assertEqual(streamed, "A streamed report.")
+        self.assertEqual(
+            result_container["result"],
+            {
+                "report": "A streamed report.",
+                "sources": results["sources"],
+                "images": [],
+            },
         )
 
     def test_call_llm_reports_a_friendly_error_when_both_providers_fail(self):

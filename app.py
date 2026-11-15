@@ -6,6 +6,7 @@ import random
 import re
 from datetime import datetime
 from io import BytesIO
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 from openai import OpenAIError
@@ -14,9 +15,9 @@ from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
-from streamlit.errors import StreamlitSecretNotFoundError
+from streamlit.errors import StreamlitAPIException, StreamlitSecretNotFoundError
 
-from agent import run_research, transcribe_audio
+from agent import run_research_stream, transcribe_audio
 
 
 def _load_streamlit_secrets_into_environment() -> None:
@@ -42,6 +43,28 @@ CHAT_PLACEHOLDERS = (
     "What would you like to explore?",
 )
 MAX_REQUESTS_PER_SESSION = 10
+TIME_GREETING_LINES = {
+    "morning": (
+        "Good morning! Ready to start the day?",
+        "Good morning! How was breakfast? What would you like to work on?",
+        "Good morning! What would you like to explore today?",
+    ),
+    "afternoon": (
+        "Good afternoon! Hope lunch went well. What can I help with?",
+        "Good afternoon! Ready to make a little progress today?",
+        "Good afternoon! What would you like to tackle today?",
+    ),
+    "evening": (
+        "Good evening! How was your day?",
+        "Good evening! What would you like to work on this evening?",
+        "Good evening! How can I help you wrap up the day?",
+    ),
+    "night": (
+        "Good night! You're up late—what can I help you with?",
+        "It's getting late! What would you like to work through?",
+        "Good night! What would you like to finish before the day ends?",
+    ),
+}
 
 def _start_new_chat() -> None:
     st.session_state["messages"] = []
@@ -51,16 +74,16 @@ def _start_new_chat() -> None:
 
 def _time_greeting(hour: int | None = None) -> str:
     if hour is None:
-        hour = datetime.now().astimezone().hour
+        hour = datetime.now(ZoneInfo("Asia/Kolkata")).hour
     if 5 <= hour < 12:
-        return "Good morning. How was breakfast? What would you like to work on today?"
-    if 12 <= hour < 15:
-        return "Hope lunch went well. What should we tackle this afternoon?"
-    if 15 <= hour < 19:
-        return "Hope your day's going smoothly. What would you like to make progress on?"
-    if 19 <= hour < 23:
-        return "How has your day been? What can I help you wrap up?"
-    return "You're up late. What can I help you work through?"
+        period = "morning"
+    elif 12 <= hour < 17:
+        period = "afternoon"
+    elif 17 <= hour < 21:
+        period = "evening"
+    else:
+        period = "night"
+    return random.choice(TIME_GREETING_LINES[period])
 
 
 def _visible_report(report: str) -> str:
@@ -124,20 +147,32 @@ def _build_pdf(report: str, sources: list[dict]) -> bytes:
 def _render_images(images: object) -> None:
     if not isinstance(images, list):
         return
-    for image in images[:1]:
+    valid_images = []
+    for image in images[:4]:
         if not isinstance(image, dict):
             continue
         description = image.get("description") or None
         url = image.get("url")
         encoded = image.get("base64")
         if isinstance(url, str) and url.startswith(("https://", "http://")):
-            st.image(url, caption=description, width=500)
+            valid_images.append((url, description))
         elif isinstance(encoded, str):
-            st.image(
-                base64.b64decode(encoded),
-                caption=description,
-                width=500,
-            )
+            try:
+                valid_images.append(
+                    (base64.b64decode(encoded, validate=True), description)
+                )
+            except ValueError:
+                continue
+
+    if not valid_images:
+        return
+    columns = st.columns(len(valid_images), gap="small")
+    for column, (image_data, description) in zip(columns, valid_images):
+        try:
+            with column:
+                st.image(image_data, caption=description, width="stretch")
+        except (StreamlitAPIException, ValueError, OSError):
+            continue
 
 
 def _render_reply_actions(
@@ -289,10 +324,18 @@ def _render_result(result: dict, key_prefix: str = "result") -> None:
         return
     report = _visible_report(report)
     st.markdown(report)
-    _render_images(result.get("images"))
 
     if result.get("kind") == "chat":
+        images = result.get("images")
+        if any(
+            isinstance(image, dict)
+            and image.get("description") == "Generated image"
+            for image in (images if isinstance(images, list) else [])
+        ):
+            _render_images(images)
         return
+
+    _render_images(result.get("images"))
 
     sources = result.get("sources")
     if not isinstance(sources, list):
@@ -377,6 +420,11 @@ st.markdown(
 
     .stApp {
         font-family: "DM Sans", "Segoe UI", system-ui, sans-serif;
+    }
+
+    section.main > div {
+        max-width: 1120px;
+        margin-inline: auto;
     }
 
     div[class*="_actions"] div[data-testid="stHorizontalBlock"] {
@@ -513,6 +561,36 @@ st.markdown(
         border-color: transparent;
         padding-inline: 0.4rem;
     }
+
+    @media (max-width: 640px) {
+        section.main > div {
+            width: 100%;
+            max-width: 100%;
+            padding: 1rem 0.75rem 5rem;
+        }
+
+        div[data-testid="stChatInput"] {
+            width: 100% !important;
+            max-width: 100% !important;
+        }
+
+        div[data-testid="stMarkdownContainer"] h1 {
+            font-size: 1.4rem;
+        }
+
+        div[class*="_actions"] div[data-testid="stHorizontalBlock"] {
+            gap: 0.15rem !important;
+        }
+
+        div[class*="_actions"] button {
+            padding-inline: 0.15rem !important;
+            font-size: 0.72rem !important;
+        }
+
+        .st-key-new_chat_top {
+            margin-top: 0;
+        }
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -599,11 +677,16 @@ if prompt := st.chat_input(
                         progress_line.caption(stage)
 
                     try:
-                        result = run_research(
-                            topic,
-                            progress_callback=update_progress,
-                            conversation_history=conversation_history,
+                        result_container = {}
+                        st.write_stream(
+                            run_research_stream(
+                                topic,
+                                result_container,
+                                progress_callback=update_progress,
+                                conversation_history=conversation_history,
+                            )
                         )
+                        result = result_container.get("result")
                     except (OpenAIError, RuntimeError, TimeoutError, ValueError) as error:
                         update_progress("The response could not be completed.")
                         assistant_message["error"] = (
