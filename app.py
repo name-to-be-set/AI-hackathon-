@@ -33,6 +33,16 @@ def _load_streamlit_secrets_into_environment() -> None:
             continue
         if value is not None and str(value).strip():
             os.environ[name] = str(value)
+            _load_streamlit_secrets_into_environment()
+
+CHAT_PLACEHOLDERS = (
+    "Ask me anything...",
+    "What's on your mind?",
+    "Type or tap the mic to speak...",
+    "What would you like to explore?",
+)
+MAX_REQUESTS_PER_SESSION = 10
+
 def _start_new_chat() -> None:
     st.session_state["messages"] = []
     st.session_state["greeting"] = _time_greeting()
