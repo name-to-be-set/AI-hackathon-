@@ -149,7 +149,19 @@ class AppTests(unittest.TestCase):
             any("request could not be completed" in item.value for item in app.error)
         )
 
-    def test_chat_history_is_saved_and_can_be_reopened(self):
+    def test_demo_request_limit_blocks_another_research_call(self):
+        with patch("agent.run_research") as research:
+            app = AppTest.from_file(APP_FILE).run()
+            app.session_state["demo_requests_used"] = 10
+            _send_message(app, "one more request")
+
+        self.assertFalse(app.exception)
+        research.assert_not_called()
+        self.assertTrue(
+            any("10-request demo limit" in warning.value for warning in app.warning)
+        )
+
+    def test_chat_is_only_available_in_the_current_session(self):
         with patch(
             "agent.run_research",
             return_value={
@@ -162,6 +174,10 @@ class AppTests(unittest.TestCase):
             first_app = AppTest.from_file(APP_FILE).run()
             _send_message(first_app, "Remember this conversation")
             self.assertFalse(first_app.exception)
+            self.assertEqual(
+                [message["role"] for message in first_app.session_state["messages"]],
+                ["user", "assistant"],
+            )
             like_button = next(
                 button for button in first_app.button if button.label == "👍"
             )
@@ -170,27 +186,22 @@ class AppTests(unittest.TestCase):
                 button for button in first_app.button if button.label == "👎"
             )
             dislike_button.click().run()
+            self.assertEqual(
+                first_app.session_state["messages"][1]["feedback"],
+                "dislike",
+            )
 
             reopened_app = AppTest.from_file(APP_FILE).run()
-            history_button = next(
-                button
-                for button in reopened_app.button
-                if button.label == "Remember this conversation"
-            )
-            history_button.click().run()
 
         self.assertFalse(reopened_app.exception)
-        self.assertEqual(
-            [message["role"] for message in reopened_app.session_state["messages"]],
-            ["user", "assistant"],
+        self.assertEqual(reopened_app.session_state["messages"], [])
+        self.assertFalse(
+            any(
+                button.label == "Remember this conversation"
+                for button in reopened_app.button
+            )
         )
-        self.assertEqual(
-            reopened_app.session_state["messages"][1]["feedback"],
-            "dislike",
-        )
-        self.assertTrue(
-            any("Saved response" in element.value for element in reopened_app.markdown)
-        )
+        self.assertFalse(Path(os.environ["CHAT_DB_PATH"]).exists())
 
     def test_initial_greeting_is_shown_before_first_message(self):
         app = AppTest.from_file(APP_FILE).run()

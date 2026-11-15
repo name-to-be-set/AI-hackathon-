@@ -74,23 +74,24 @@ def _get_llm_client() -> OpenAI:
 
 
 def transcribe_audio(audio_file: tuple[str, bytes, str]) -> str:
-    """Transcribe a recorded audio file through the configured Bifrost model."""
-    client = _get_llm_client()
+    """Transcribe a recorded audio file with Groq Whisper."""
+    groq_api_key = os.getenv("GROQ_API_KEY")
+    if not groq_api_key:
+        raise RuntimeError("GROQ_API_KEY is missing from the environment.")
+    client = OpenAI(
+        api_key=groq_api_key,
+        base_url=GROQ_BASE_URL,
+        timeout=LLM_TIMEOUT_SECONDS,
+    )
     try:
         response = client.audio.transcriptions.create(
-            model=TRANSCRIPTION_MODEL,
+            model="whisper-large-v3-turbo",
             file=audio_file,
             response_format="json",
         )
-    except AuthenticationError as error:
-        raise RuntimeError(
-            "Bifrost rejected BIFROST_API_KEY. Check that the virtual key is valid "
-            "and permits the configured transcription model."
-        ) from error
     except OpenAIError as error:
         raise RuntimeError(
-            "Audio transcription failed. Check that Bifrost has the configured "
-            f"transcription model enabled ({TRANSCRIPTION_MODEL})."
+            "Audio transcription failed. Please try again or type your message."
         ) from error
 
     text = getattr(response, "text", "")
