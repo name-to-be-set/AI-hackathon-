@@ -69,6 +69,7 @@ TIME_GREETING_LINES = {
 def _start_new_chat() -> None:
     st.session_state["messages"] = []
     st.session_state["greeting"] = _time_greeting()
+    st.session_state["generation_active"] = False
     st.session_state.pop("share_message", None)
 
 
@@ -194,7 +195,8 @@ def _render_reply_actions(
         ) = st.columns([1, 1, 1, 1], gap="small")
         with like_column:
             if st.button(
-                "👍",
+                "Like",
+                icon=":material/thumb_up_off_alt:",
                 key=f"{key_prefix}_like",
                 help="Mark this as a good reply",
                 type=(
@@ -210,7 +212,8 @@ def _render_reply_actions(
                 st.rerun()
         with dislike_column:
             if st.button(
-                "👎",
+                "Dislike",
+                icon=":material/thumb_down_off_alt:",
                 key=f"{key_prefix}_dislike",
                 help="Mark this as a bad reply",
                 type=(
@@ -248,10 +251,18 @@ def _render_reply_actions(
                         Uint8Array.from(atob("{encoded_report}"), character =>
                             character.charCodeAt(0))
                     );
+                    let resetTimer;
+                    const showCopied = () => {{
+                        button.textContent = "Copied";
+                        clearTimeout(resetTimer);
+                        resetTimer = setTimeout(() => {{
+                            button.textContent = "Copy";
+                        }}, 1500);
+                    }};
                     button.addEventListener("click", async () => {{
                         try {{
                             await navigator.clipboard.writeText(text);
-                            button.textContent = "Copied";
+                            showCopied();
                         }} catch {{
                             const input = document.createElement("textarea");
                             input.value = text;
@@ -259,7 +270,11 @@ def _render_reply_actions(
                             input.select();
                             const copied = document.execCommand("copy");
                             input.remove();
-                            button.textContent = copied ? "Copied" : "Copy unavailable";
+                            if (copied) {{
+                                showCopied();
+                            }} else {{
+                                button.textContent = "Copy unavailable";
+                            }}
                         }}
                     }});
                 }})();
@@ -406,6 +421,10 @@ def _render_conversation(messages: list[dict]) -> None:
                     st.caption(detail)
             elif result := message.get("result"):
                 _render_result(result, key_prefix=f"chat_{index}")
+            elif partial_report := message.get("partial_report"):
+                st.markdown(_visible_report(partial_report))
+                if message.get("generation_stopped"):
+                    st.caption("Response stopped.")
             _render_reply_actions(
                 message,
                 key_prefix=f"chat_{index}",
@@ -423,19 +442,21 @@ st.markdown(
     }
 
     section.main > div {
-        max-width: 1120px;
+        width: 100%;
+        max-width: none;
         margin-inline: auto;
+        padding-inline: 1.25rem;
     }
 
     div[class*="_actions"] div[data-testid="stHorizontalBlock"] {
         flex-direction: row !important;
         flex-wrap: nowrap !important;
-        gap: 0.3rem !important;
+        gap: 0.15rem !important;
     }
 
     div[class*="_actions"] div[data-testid="stColumn"] {
-        width: 0 !important;
-        flex: 1 1 0% !important;
+        width: auto !important;
+        flex: 0 0 auto !important;
         min-width: 0 !important;
         padding-inline: 0 !important;
     }
@@ -443,13 +464,88 @@ st.markdown(
     div[class*="_actions"] button {
         min-width: 0 !important;
         white-space: nowrap !important;
-        padding-inline: 0.25rem !important;
-        font-size: 0.82rem !important;
+        padding-inline: 0.35rem !important;
+        font-size: 0.78rem !important;
+    }
+
+    div[class*="_actions"] div[data-testid="stHorizontalBlock"] > div:nth-child(-n+2) button {
+        min-width: 2.4rem !important;
+        padding-inline: 0.35rem !important;
+        color: rgba(255, 255, 255, 0.78);
+    }
+
+    div[class*="_actions"] div[data-testid="stHorizontalBlock"] > div:nth-child(-n+2) button[kind="primary"] {
+        color: #ffffff !important;
+        background: transparent !important;
+        border-color: transparent !important;
+    }
+
+    div[data-testid="stChatMessage"] [data-testid="stChatMessageAvatar"] {
+        display: none !important;
+    }
+
+    div[data-testid="stChatMessage"] {
+        width: 100% !important;
+        padding-inline: 0 !important;
+    }
+
+    div[data-testid="stChatMessage"] [data-testid="stChatMessageContent"] {
+        width: 100% !important;
+        max-width: none !important;
+        min-width: 0 !important;
+    }
+
+    div[data-testid="stChatMessage"][aria-label*="user"] [data-testid="stChatMessageContent"] {
+        width: fit-content !important;
+        max-width: min(90%, 900px) !important;
+        margin-right: auto !important;
+        padding: 0.65rem 0.9rem;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 1.1rem 1.1rem 1.1rem 0.25rem;
+        background: rgba(255, 255, 255, 0.08);
+    }
+
+    .greeting-text {
+        font-size: clamp(2rem, 5vw, 3.4rem);
+        font-weight: 600;
+        line-height: 1.2;
+    }
+
+    .jasmine-flower {
+        flex: 0 0 auto;
+        color: #ffffff;
+        font-size: clamp(3rem, 7vw, 5rem);
+        line-height: 1;
+        filter: drop-shadow(0 0 0.8rem rgba(255, 255, 255, 0.28));
+    }
+
+    .st-key-stop_generation {
+        position: fixed;
+        z-index: 1001;
+        right: calc(50% - 170px);
+        bottom: 1.05rem;
+    }
+
+    .st-key-stop_generation button {
+        width: 2.4rem;
+        min-height: 2.4rem;
+        padding: 0;
+        border-radius: 50%;
+        color: #ffffff;
+        background: #b42318;
+        border-color: #b42318;
     }
 
     div[data-testid="stMarkdownContainer"] h1 {
         font-size: 1.65rem;
         font-weight: 700;
+    }
+
+    .st-key-app_title h1 {
+        font-size: 2.1rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
     }
 
     div[data-testid="stMarkdownContainer"] h2 {
@@ -566,7 +662,7 @@ st.markdown(
         section.main > div {
             width: 100%;
             max-width: 100%;
-            padding: 1rem 0.75rem 5rem;
+            padding: 0.75rem 0.5rem 5rem;
         }
 
         div[data-testid="stChatInput"] {
@@ -574,17 +670,18 @@ st.markdown(
             max-width: 100% !important;
         }
 
-        div[data-testid="stMarkdownContainer"] h1 {
-            font-size: 1.4rem;
-        }
-
-        div[class*="_actions"] div[data-testid="stHorizontalBlock"] {
-            gap: 0.15rem !important;
+        .st-key-app_title h1 {
+            font-size: 1.45rem;
         }
 
         div[class*="_actions"] button {
             padding-inline: 0.15rem !important;
             font-size: 0.72rem !important;
+        }
+
+        .st-key-stop_generation {
+            right: 4.65rem;
+            bottom: 1rem;
         }
 
         .st-key-new_chat_top {
@@ -601,6 +698,7 @@ if "greeting" not in st.session_state:
 if "chat_placeholder" not in st.session_state:
     st.session_state["chat_placeholder"] = random.choice(CHAT_PLACEHOLDERS)
 st.session_state.setdefault("demo_requests_used", 0)
+st.session_state.setdefault("generation_active", False)
 
 with st.sidebar:
     st.markdown("### This session")
@@ -611,7 +709,8 @@ with st.sidebar:
 
 title_column, new_chat_column = st.columns([0.95, 0.05])
 with title_column:
-    st.title("AI Research Assistant")
+    with st.container(key="app_title"):
+        st.title("AI RESEARCH ASSISTANT")
 with new_chat_column:
     if st.button("✎", key="new_chat_top", help="New chat"):
         _start_new_chat()
@@ -623,7 +722,30 @@ if messages:
     _render_conversation(messages)
 else:
     with st.chat_message("assistant"):
-        st.markdown(st.session_state["greeting"])
+        greeting_column, flower_column = st.columns([0.88, 0.12])
+        with greeting_column:
+            st.markdown(
+                f'<div class="greeting-text">{html.escape(st.session_state["greeting"])}</div>',
+                unsafe_allow_html=True,
+            )
+        with flower_column:
+            st.markdown(
+                '<div class="jasmine-flower" role="img" '
+                'aria-label="White jasmine flower">❀</div>',
+                unsafe_allow_html=True,
+            )
+
+if st.session_state["generation_active"] and st.button(
+    "⏹",
+    key="stop_generation",
+    help="Stop the current response",
+):
+    st.session_state["generation_active"] = False
+    for existing_message in reversed(st.session_state["messages"]):
+        if existing_message.get("role") == "assistant":
+            existing_message["generation_stopped"] = True
+            break
+    st.rerun()
 
 if prompt := st.chat_input(
     st.session_state["chat_placeholder"],
@@ -663,6 +785,8 @@ if prompt := st.chat_input(
 
             progress_steps = []
             assistant_message = {"role": "assistant", "progress": progress_steps}
+            messages.append(assistant_message)
+            st.session_state["generation_active"] = True
             with st.chat_message("assistant"):
                 with st.expander(
                     "Thinking",
@@ -672,22 +796,36 @@ if prompt := st.chat_input(
                 ):
                     progress_line = st.empty()
 
+                st.button(
+                    "⏹",
+                    key="stop_generation",
+                    help="Stop the current response",
+                )
+
                 def update_progress(stage: str) -> None:
                     progress_steps.append(stage)
                     progress_line.caption(stage)
 
-                try:
-                    result_container = {}
-                    st.write_stream(
-                        run_research_stream(
-                            topic,
-                            result_container,
-                            progress_callback=update_progress,
-                            conversation_history=conversation_history,
+                result_container = {}
+
+                def tracked_stream():
+                    for chunk in run_research_stream(
+                        topic,
+                        result_container,
+                        progress_callback=update_progress,
+                        conversation_history=conversation_history,
+                    ):
+                        assistant_message["partial_report"] = (
+                            assistant_message.get("partial_report", "") + chunk
                         )
-                    )
+                        yield chunk
+
+                try:
+                    st.write_stream(tracked_stream())
                     result = result_container.get("result")
+                    st.session_state["generation_active"] = False
                 except (OpenAIError, RuntimeError, TimeoutError, ValueError) as error:
+                    st.session_state["generation_active"] = False
                     update_progress("The response could not be completed.")
                     assistant_message["error"] = (
                         "The request could not be completed. Check the error details below."
@@ -704,7 +842,7 @@ if prompt := st.chat_input(
                         assistant_message["error"] = str(result["error"])
                     else:
                         update_progress("Response ready.")
+                        assistant_message.pop("partial_report", None)
                         assistant_message["result"] = result
 
-            messages.append(assistant_message)
             st.rerun()

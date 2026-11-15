@@ -124,8 +124,8 @@ class AppTests(unittest.TestCase):
                     for button in app.download_button
                 )
             )
-            self.assertTrue(any(button.label == "👍" for button in app.button))
-            self.assertTrue(any(button.label == "👎" for button in app.button))
+            self.assertTrue(any(button.label == "Like" for button in app.button))
+            self.assertTrue(any(button.label == "Dislike" for button in app.button))
             self.assertTrue(any(button.label == "Share" for button in app.button))
             self.assertEqual(
                 stages,
@@ -197,11 +197,11 @@ class AppTests(unittest.TestCase):
                 ["user", "assistant"],
             )
             like_button = next(
-                button for button in first_app.button if button.label == "👍"
+                button for button in first_app.button if button.label == "Like"
             )
             like_button.click().run()
             dislike_button = next(
-                button for button in first_app.button if button.label == "👎"
+                button for button in first_app.button if button.label == "Dislike"
             )
             dislike_button.click().run()
             self.assertEqual(
@@ -235,17 +235,17 @@ class AppTests(unittest.TestCase):
                 for element in app.markdown
             )
         )
+        self.assertTrue(
+            any("White jasmine flower" in element.value for element in app.markdown)
+        )
         self.assertFalse(
             any(
-                button.label in {"👍", "👎", "Share"}
+                button.label in {"Like", "Dislike", "Share"}
                 for button in app.button
             )
         )
         self.assertTrue(
-            any(
-                phrase in app.session_state["greeting"]
-                for phrase in ("breakfast", "lunch", "day", "late")
-            )
+            app.session_state["greeting"].startswith(("Good ", "It's getting late!"))
         )
         self.assertFalse(
             any(
@@ -267,6 +267,23 @@ class AppTests(unittest.TestCase):
         self.assertTrue(
             any("@media (max-width: 640px)" in element.value for element in app.markdown)
         )
+
+    def test_stop_button_marks_an_in_progress_response_as_stopped(self):
+        app = AppTest.from_file(APP_FILE).run()
+        app.session_state["messages"] = [
+            {"role": "user", "content": "A research question"},
+            {"role": "assistant", "partial_report": "Partial answer"},
+        ]
+        app.session_state["generation_active"] = True
+        app.run()
+
+        self.assertFalse(app.exception)
+        stop_button = next(button for button in app.button if button.label == "⏹")
+        stop_button.click().run()
+
+        self.assertFalse(app.exception)
+        self.assertFalse(app.session_state["generation_active"])
+        self.assertTrue(app.session_state["messages"][-1]["generation_stopped"])
 
 
 if __name__ == "__main__":
