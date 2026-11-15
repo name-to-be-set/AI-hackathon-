@@ -20,35 +20,19 @@ from agent import run_research, transcribe_audio
 
 
 def _load_streamlit_secrets_into_environment() -> None:
-    try:
-        secrets = st.secrets
-    except StreamlitSecretNotFoundError:
-        return
-
     for name in (
         "TAVILY_API_KEY",
         "GROQ_API_KEY",
         "GEMINI_API_KEY",
-        "BIFROST_API_KEY",
     ):
         if os.getenv(name, "").strip():
             continue
-        value = secrets.get(name)
+        try:
+            value = st.secrets.get(name)
+        except StreamlitSecretNotFoundError:
+            continue
         if value is not None and str(value).strip():
             os.environ[name] = str(value)
-
-
-_load_streamlit_secrets_into_environment()
-
-CHAT_PLACEHOLDERS = (
-    "Ask me anything...",
-    "What's on your mind?",
-    "Type or tap the mic to speak...",
-    "What would you like to explore?",
-)
-MAX_REQUESTS_PER_SESSION = 10
-
-
 def _start_new_chat() -> None:
     st.session_state["messages"] = []
     st.session_state["greeting"] = _time_greeting()
