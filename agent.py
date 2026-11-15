@@ -28,7 +28,7 @@ load_dotenv()
 
 MODEL = "openai/gpt-oss-20b"
 PLANNER_MODEL = MODEL
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-3.6-flash"
 LLM_TIMEOUT_SECONDS = 30
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
