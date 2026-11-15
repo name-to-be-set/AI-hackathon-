@@ -7,7 +7,11 @@
     "enforce_auth_on_inference": true
   },
   "config_store": {
-    "enabled": false
+    "enabled": true,
+    "type": "sqlite",
+    "config": {
+      "path": "/app/data/config.db"
+    }
   },
   "logs_store": {
     "enabled": false
