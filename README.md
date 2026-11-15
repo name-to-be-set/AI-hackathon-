@@ -131,14 +131,29 @@ sleep when idle, so allow a short startup delay when opening the demo. The app
 allows up to 10 submitted messages per Streamlit session. This helps limit
 accidental demo usage, but a new session resets the count and it is not a
 provider billing limit; configure provider-side quotas separately.
+The backend also caps prompts at 12,000 characters, keeps conversation history
+within a 20,000-character budget, and limits each process to five active
+requests, 60 requests per minute overall, and 10 per session per minute. Requests
+wait in a FIFO queue for up to 15 seconds before receiving a clear busy message.
+These limits are in-process only and are not shared across multiple app instances.
+Provider calls retry transient connection, timeout, rate-limit, and server errors
+up to two times before trying the fallback provider. Provider tokenization differs,
+so the input budget is character-based rather than an exact token count.
 
 ## Tests
 
 Run the backend and Streamlit UI tests:
 
 ```bash
-python -m unittest -v test_agent test_app
+python -m unittest -v test_agent test_app test_request_limiter
 ```
+
+These tests mock external AI and search providers. They cover prompt edge cases,
+empty input, search-result prompt-injection boundaries, provider retries,
+request limiting, and 20 simultaneous backend conversations with separate
+histories. They do not measure live model quality or deployment capacity; the
+backend concurrency test is not a substitute for load testing the deployed
+Streamlit app.
 
 The six varied research prompts are in [test_prompts.md](./test_prompts.md).
 The live prompt run and observed latency notes are in

@@ -167,6 +167,68 @@ class AppTests(unittest.TestCase):
             any("request could not be completed" in item.value for item in app.error)
         )
 
+    def test_blank_message_is_rejected_without_using_demo_request(self):
+        with patch("agent.run_research_stream") as research:
+            app = AppTest.from_file(APP_FILE).run()
+            requests_before = app.session_state["demo_requests_used"]
+            app.chat_input[0].set_value("   ").run()
+
+        self.assertFalse(app.exception)
+        research.assert_not_called()
+        self.assertEqual(app.session_state["demo_requests_used"], requests_before)
+        self.assertTrue(
+            any("Write a message before sending." in item.value for item in app.warning)
+        )
+
+    def test_shared_rate_limit_is_shown_and_does_not_use_demo_request(self):
+        from request_limiter import RequestLimitExceeded
+
+        with (
+            patch(
+                "request_limiter.FairRequestLimiter.request_slot",
+                side_effect=RequestLimitExceeded("service is busy"),
+            ),
+            patch("agent.run_research_stream") as research,
+        ):
+            app = AppTest.from_file(APP_FILE).run()
+            app.chat_input[0].set_value("please respond").run()
+
+        self.assertFalse(app.exception)
+        research.assert_not_called()
+        self.assertEqual(app.session_state["demo_requests_used"], 0)
+        self.assertTrue(
+            any("service is busy" in item.value for item in app.error)
+        )
+
+    def test_edge_case_prompts_reach_the_backend_without_truncation(self):
+        prompts = [
+            "x",
+            "?? 🤖",
+            "Explain this, yaar — Hindi + English please.",
+            "Format this code/table/link: `x = 1` | https://example.com",
+            "long " * 2500,
+        ]
+        received = []
+
+        def fake_stream(topic, result_container, **_kwargs):
+            received.append(topic)
+            result = {
+                "kind": "chat",
+                "report": "Received",
+                "sources": [],
+                "images": [],
+            }
+            result_container["result"] = result
+            yield result["report"]
+
+        with patch("agent.run_research_stream", side_effect=fake_stream):
+            app = AppTest.from_file(APP_FILE).run()
+            for prompt in prompts:
+                _send_message(app, prompt)
+                self.assertFalse(app.exception)
+
+        self.assertEqual(received, [prompt.strip() for prompt in prompts])
+
     def test_demo_request_limit_blocks_another_research_call(self):
         with patch("agent.run_research_stream") as research:
             app = AppTest.from_file(APP_FILE).run()
@@ -289,7 +351,11 @@ class AppTests(unittest.TestCase):
         app = AppTest.from_file(APP_FILE).run()
 
         styles = "\n".join(element.value for element in app.markdown)
-        self.assertIn(".st-key-stop_generation_streaming button", styles)
+        self.assertIn(".st-key-stop_generation button", styles)
+        self.assertIn(
+            "right: max(calc((100vw - 520px) / 2 + 80px), 5.5rem);",
+            styles,
+        )
         self.assertIn("width: 32px;", styles)
         self.assertIn("height: 32px;", styles)
 

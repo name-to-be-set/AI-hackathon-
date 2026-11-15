@@ -4,6 +4,7 @@ import html
 import os
 import random
 import re
+import uuid
 from datetime import datetime
 from io import BytesIO
 from zoneinfo import ZoneInfo
@@ -18,6 +19,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 from streamlit.errors import StreamlitAPIException, StreamlitSecretNotFoundError
 
 from agent import run_research_stream, transcribe_audio
+from request_limiter import REQUEST_LIMITER, RequestLimitExceeded
 
 
 def _load_streamlit_secrets_into_environment() -> None:
@@ -529,16 +531,14 @@ st.markdown(
         filter: drop-shadow(0 0 0.8rem rgba(255, 255, 255, 0.28));
     }
 
-    .st-key-stop_generation,
-    .st-key-stop_generation_streaming {
+    .st-key-stop_generation {
         position: fixed;
         z-index: 1001;
         right: max(calc((100vw - 520px) / 2 + 80px), 5.5rem);
-        bottom: 1.05rem;
+        bottom: 1rem;
     }
 
-    .st-key-stop_generation button,
-    .st-key-stop_generation_streaming button {
+    .st-key-stop_generation button {
         display: flex;
         align-items: center;
         justify-content: center;
@@ -695,8 +695,7 @@ st.markdown(
             font-size: 0.72rem !important;
         }
 
-        .st-key-stop_generation,
-        .st-key-stop_generation_streaming {
+        .st-key-stop_generation {
             right: 5.5rem;
             bottom: 1rem;
         }
@@ -716,6 +715,7 @@ if "chat_placeholder" not in st.session_state:
     st.session_state["chat_placeholder"] = random.choice(CHAT_PLACEHOLDERS)
 st.session_state.setdefault("demo_requests_used", 0)
 st.session_state.setdefault("generation_active", False)
+st.session_state.setdefault("request_session_id", uuid.uuid4().hex)
 
 with st.sidebar:
     st.markdown("### This session")
@@ -809,13 +809,6 @@ if prompt := st.chat_input(
                 ):
                     progress_line = st.empty()
 
-                st.button(
-                    "⏸",
-                    key="stop_generation_streaming",
-                    help="Stop the current response",
-                    on_click=_stop_generation,
-                )
-
                 def update_progress(stage: str) -> None:
                     progress_steps.append(stage)
                     progress_line.caption(stage)
@@ -823,16 +816,28 @@ if prompt := st.chat_input(
                 result_container = {}
 
                 def tracked_stream():
-                    for chunk in run_research_stream(
-                        topic,
-                        result_container,
-                        progress_callback=update_progress,
-                        conversation_history=conversation_history,
-                    ):
-                        assistant_message["partial_report"] = (
-                            assistant_message.get("partial_report", "") + chunk
-                        )
-                        yield chunk
+                    try:
+                        with REQUEST_LIMITER.request_slot(
+                            st.session_state["request_session_id"]
+                        ):
+                            for chunk in run_research_stream(
+                                topic,
+                                result_container,
+                                progress_callback=update_progress,
+                                conversation_history=conversation_history,
+                            ):
+                                assistant_message["partial_report"] = (
+                                    assistant_message.get("partial_report", "") + chunk
+                                )
+                                yield chunk
+                    except RequestLimitExceeded as error:
+                        st.session_state["demo_requests_used"] -= 1
+                        result_container["result"] = {
+                            "error": str(error),
+                            "report": str(error),
+                            "sources": [],
+                            "images": [],
+                        }
 
                 try:
                     st.write_stream(tracked_stream())
