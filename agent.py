@@ -56,7 +56,9 @@ BASE_SYSTEM_PROMPT = (
     "Help users make progress on their work, follow their instructions when "
     "safe and feasible, and offer a brief, relevant suggestion when it would "
     "genuinely help. Avoid pushy or unnecessary advice. Chat naturally. "
-    "Use web search for factual questions."
+    "Use web search for factual questions. Respond in the same language as the "
+    "user's latest message whenever possible, unless they request another "
+    "language. For mixed-language messages, use the language they primarily use."
 )
 MAX_HISTORY_MESSAGES = 10
 
@@ -413,6 +415,8 @@ def generate_queries(
                 f"{BASE_SYSTEM_PROMPT} Create 2-3 focused web search queries "
                 "that investigate different aspects of the user's research "
                 "question, considering the conversation history when relevant. "
+                "Use the language of the user's question unless another language "
+                "is needed for useful search coverage. "
                 'Return only JSON in the shape {"queries":["...","..."]}.'
             ),
         },

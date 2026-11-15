@@ -278,12 +278,20 @@ class AppTests(unittest.TestCase):
         app.run()
 
         self.assertFalse(app.exception)
-        stop_button = next(button for button in app.button if button.label == "⏹")
+        stop_button = next(button for button in app.button if button.label == "⏸")
         stop_button.click().run()
 
         self.assertFalse(app.exception)
         self.assertFalse(app.session_state["generation_active"])
         self.assertTrue(app.session_state["messages"][-1]["generation_stopped"])
+
+    def test_pause_control_matches_composer_button_size(self):
+        app = AppTest.from_file(APP_FILE).run()
+
+        styles = "\n".join(element.value for element in app.markdown)
+        self.assertIn(".st-key-stop_generation_streaming button", styles)
+        self.assertIn("width: 32px;", styles)
+        self.assertIn("height: 32px;", styles)
 
 
 if __name__ == "__main__":

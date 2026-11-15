@@ -73,6 +73,14 @@ def _start_new_chat() -> None:
     st.session_state.pop("share_message", None)
 
 
+def _stop_generation() -> None:
+    st.session_state["generation_active"] = False
+    for existing_message in reversed(st.session_state["messages"]):
+        if existing_message.get("role") == "assistant":
+            existing_message["generation_stopped"] = True
+            break
+
+
 def _time_greeting(hour: int | None = None) -> str:
     if hour is None:
         hour = datetime.now(ZoneInfo("Asia/Kolkata")).hour
@@ -240,8 +248,10 @@ def _render_reply_actions(
             st.html(
                 f"""
                 <button id="copy-reply-{key_prefix}" type="button" aria-label="Copy reply"
-                    style="background:transparent;border:0;color:#e5e7eb;
-                    font:inherit;padding:5px 8px;cursor:pointer;white-space:nowrap;">
+                    style="display:flex;align-items:center;justify-content:center;
+                    width:100%;height:40px;box-sizing:border-box;background:transparent;
+                    border:0;color:#e5e7eb;font:inherit;padding:0 8px;cursor:pointer;
+                    white-space:nowrap;">
                     Copy
                 </button>
                 <script>
@@ -519,21 +529,27 @@ st.markdown(
         filter: drop-shadow(0 0 0.8rem rgba(255, 255, 255, 0.28));
     }
 
-    .st-key-stop_generation {
+    .st-key-stop_generation,
+    .st-key-stop_generation_streaming {
         position: fixed;
         z-index: 1001;
-        right: calc(50% - 170px);
+        right: max(calc((100vw - 520px) / 2 + 80px), 5.5rem);
         bottom: 1.05rem;
     }
 
-    .st-key-stop_generation button {
-        width: 2.4rem;
-        min-height: 2.4rem;
+    .st-key-stop_generation button,
+    .st-key-stop_generation_streaming button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        min-height: 32px;
         padding: 0;
         border-radius: 50%;
         color: #ffffff;
-        background: #b42318;
-        border-color: #b42318;
+        background: transparent;
+        border-color: transparent;
     }
 
     div[data-testid="stMarkdownContainer"] h1 {
@@ -679,8 +695,9 @@ st.markdown(
             font-size: 0.72rem !important;
         }
 
-        .st-key-stop_generation {
-            right: 4.65rem;
+        .st-key-stop_generation,
+        .st-key-stop_generation_streaming {
+            right: 5.5rem;
             bottom: 1rem;
         }
 
@@ -735,17 +752,13 @@ else:
                 unsafe_allow_html=True,
             )
 
-if st.session_state["generation_active"] and st.button(
-    "⏹",
-    key="stop_generation",
-    help="Stop the current response",
-):
-    st.session_state["generation_active"] = False
-    for existing_message in reversed(st.session_state["messages"]):
-        if existing_message.get("role") == "assistant":
-            existing_message["generation_stopped"] = True
-            break
-    st.rerun()
+if st.session_state["generation_active"]:
+    st.button(
+        "⏸",
+        key="stop_generation",
+        help="Stop the current response",
+        on_click=_stop_generation,
+    )
 
 if prompt := st.chat_input(
     st.session_state["chat_placeholder"],
@@ -797,9 +810,10 @@ if prompt := st.chat_input(
                     progress_line = st.empty()
 
                 st.button(
-                    "⏹",
-                    key="stop_generation",
+                    "⏸",
+                    key="stop_generation_streaming",
                     help="Stop the current response",
+                    on_click=_stop_generation,
                 )
 
                 def update_progress(stage: str) -> None:

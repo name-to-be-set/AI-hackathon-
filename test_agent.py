@@ -473,6 +473,7 @@ class AgentTests(unittest.TestCase):
         self.assertIn("use only the supplied search results", system_prompt)
         self.assertIn("I could not find this in the search results.", system_prompt)
         self.assertIn("source links separately", system_prompt)
+        self.assertIn("same language as the user's latest message", system_prompt)
 
     def test_report_without_sources_returns_required_not_found_message(self):
         with patch("agent.call_llm") as completion:
