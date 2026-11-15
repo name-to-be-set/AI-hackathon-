@@ -27,7 +27,7 @@ from tavily import (
 load_dotenv()
 
 MODEL = "openai/gpt-oss-20b"
-PLANNER_MODEL = "llama-3.1-8b-instant"
+PLANNER_MODEL = MODEL
 GEMINI_MODEL = "gemini-2.5-flash"
 LLM_TIMEOUT_SECONDS = 30
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
