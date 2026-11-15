@@ -440,11 +440,11 @@ def _render_conversation(messages: list[dict]) -> None:
             )
 
 
-st.set_page_config(page_title="AI Research Assistant", layout="wide")
+st.set_page_config(page_title="VYOM", layout="wide")
 st.markdown(
     """
     <style>
-    @import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap");
+    @import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=DM+Sans:wght@400;500;600;700&display=swap");
 
     .stApp {
         font-family: "DM Sans", "Segoe UI", system-ui, sans-serif;
@@ -554,11 +554,25 @@ st.markdown(
         font-weight: 700;
     }
 
-    .st-key-app_title h1 {
-        font-size: 2.1rem;
-        font-weight: 700;
-        letter-spacing: 0.04em;
+    .st-key-app_title div[data-testid="stMarkdownContainer"] h1 {
+        margin: 0;
+        font-family: "Cormorant Garamond", Georgia, serif;
+        font-size: clamp(48px, 7vw, 72px);
+        font-style: italic;
+        font-weight: 600;
+        letter-spacing: 0.2em;
+        line-height: 1;
         text-transform: uppercase;
+    }
+
+    .st-key-app_title div[data-testid="stMarkdownContainer"] h1::after {
+        display: block;
+        width: min(8rem, 35%);
+        height: 2px;
+        margin-top: 0.35rem;
+        background: linear-gradient(90deg, currentColor, transparent);
+        content: "";
+        opacity: 0.55;
     }
 
     div[data-testid="stMarkdownContainer"] h2 {
@@ -586,6 +600,15 @@ st.markdown(
         min-height: 32px;
         padding: 0;
         border-radius: 50%;
+        border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+        color: currentColor;
+        background: color-mix(in srgb, currentColor 5%, transparent);
+        transition: background-color 160ms ease, border-color 160ms ease;
+    }
+
+    .st-key-chat_input button:hover:not(:disabled) {
+        border-color: color-mix(in srgb, currentColor 36%, transparent);
+        background: color-mix(in srgb, currentColor 13%, transparent);
     }
 
     div[data-testid="stChatInput"] {
@@ -593,16 +616,17 @@ st.markdown(
         max-width: 520px !important;
         margin-inline: auto !important;
         padding: 0 !important;
-        border: none !important;
-        border-radius: 0;
-        box-shadow: none !important;
     }
 
     div[data-testid="stChatInput"] > div {
-        border: 1px solid rgba(100, 116, 139, 0.5) !important;
-        border-radius: 10px !important;
+        border: 1px solid color-mix(in srgb, currentColor 22%, transparent) !important;
+        border-radius: 16px !important;
         outline: none !important;
-        box-shadow: none !important;
+        background: color-mix(in srgb, currentColor 3%, transparent) !important;
+        box-shadow:
+            0 6px 24px color-mix(in srgb, currentColor 7%, transparent),
+            inset 0 1px color-mix(in srgb, currentColor 8%, transparent) !important;
+        transition: border-color 180ms ease, box-shadow 180ms ease;
     }
 
     div[data-testid="stChatInput"] textarea {
@@ -611,7 +635,7 @@ st.markdown(
         font-size: 0.95rem;
         border-radius: 8px;
         font-family: inherit;
-        caret-color: #ffffff !important;
+        caret-color: currentColor !important;
         cursor: text;
         border-color: transparent !important;
         outline: none !important;
@@ -625,16 +649,15 @@ st.markdown(
     }
 
     div[data-testid="stChatInput"] textarea::placeholder {
-        color: #64748b !important;
-        opacity: 0.48 !important;
-    }
-
-    div[data-testid="stChatInput"]:focus-within {
-        border: none !important;
+        color: currentColor !important;
+        opacity: 0.58 !important;
     }
 
     div[data-testid="stChatInput"]:focus-within > div {
-        border-color: #ffffff !important;
+        border-color: color-mix(in srgb, currentColor 50%, transparent) !important;
+        box-shadow:
+            0 0 0 3px color-mix(in srgb, currentColor 10%, transparent),
+            0 8px 28px color-mix(in srgb, currentColor 10%, transparent) !important;
     }
 
     section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
@@ -688,8 +711,9 @@ st.markdown(
             max-width: 100% !important;
         }
 
-        .st-key-app_title h1 {
-            font-size: 1.45rem;
+        .st-key-app_title div[data-testid="stMarkdownContainer"] h1 {
+            font-size: clamp(40px, 10vw, 56px);
+            letter-spacing: 0.15em;
         }
 
         div[class*="_actions"] button {
@@ -719,7 +743,7 @@ st.session_state.setdefault("generation_active", False)
 title_column, new_chat_column = st.columns([0.95, 0.05])
 with title_column:
     with st.container(key="app_title"):
-        st.title("AI RESEARCH ASSISTANT")
+        st.title("VYOM")
 with new_chat_column:
     if st.button("✎", key="new_chat_top", help="New chat"):
         _start_new_chat()

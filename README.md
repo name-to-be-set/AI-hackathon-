@@ -1,4 +1,4 @@
-# AI Research Assistant
+# VYOM
 
 Chat naturally about everyday tasks, or turn a research topic into a structured
 Markdown report with source links. The Streamlit UI

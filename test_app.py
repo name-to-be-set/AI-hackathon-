@@ -330,6 +330,16 @@ class AppTests(unittest.TestCase):
             any("@media (max-width: 640px)" in element.value for element in app.markdown)
         )
 
+    def test_title_and_composer_use_theme_adaptive_styling(self):
+        app = AppTest.from_file(APP_FILE).run()
+
+        styles = "\n".join(element.value for element in app.markdown)
+        self.assertFalse(app.exception)
+        self.assertEqual(app.title[0].value, "VYOM")
+        self.assertIn('"Cormorant Garamond", Georgia, serif', styles)
+        self.assertIn("font-size: clamp(48px, 7vw, 72px);", styles)
+        self.assertIn("color-mix(in srgb, currentColor", styles)
+
     def test_stop_button_marks_an_in_progress_response_as_stopped(self):
         app = AppTest.from_file(APP_FILE).run()
         app.session_state["messages"] = [
