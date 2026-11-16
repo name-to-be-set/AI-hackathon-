@@ -1,3 +1,5 @@
+import threading
+from dataclasses import dataclass
 import base64
 from concurrent.futures import ThreadPoolExecutor
 import json
@@ -29,7 +31,6 @@ load_dotenv()
 
 MODEL = "openai/gpt-oss-20b"
 PLANNER_MODEL = MODEL
-GEMINI_MODEL = "gemini-3.6-flash"
 LLM_TIMEOUT_SECONDS = 30
 MAX_PROVIDER_RETRIES = 2
 RETRY_BASE_DELAY_SECONDS = 0.5
@@ -140,99 +141,152 @@ def _retry_delay(error: Exception, attempt: int) -> float:
         delay = RETRY_BASE_DELAY_SECONDS * (2**attempt)
     return min(max(delay, 0), RETRY_MAX_DELAY_SECONDS)
 
+GEMINI_MODEL = "gemini-2.5-flash"
+DEFAULT_GROQ_MODELS = (
+    "openai/gpt-oss-20b",
+    "llama-3.3-70b-versatile",
+    "openai/gpt-oss-120b",
+    "llama-3.1-8b-instant",
+)
+DEFAULT_GEMINI_MODELS = ("gemini-2.5-flash", "gemini-2.5-flash-lite")
+DEFAULT_BIFROST_MODELS = (
+    "groq/openai/gpt-oss-20b",
+    "groq/llama-3.3-70b-versatile",
+    "gemini/gemini-2.5-flash",
+)
+COOLDOWN_SECONDS = 60
+NO_TOOLS_NOTE = (
+    " You have no tools or functions. Never attempt a tool call; "
+    "reply with plain text only."
+)
+
+_cooldowns: dict[str, float] = {}
+_cooldown_lock = threading.Lock()
+
+
+@dataclass(frozen=True)
+class _Target:
+    label: str
+    base_url: str
+    api_key: str
+    model: str
+
+
+def _csv_env(name: str, default: tuple[str, ...]) -> list[str]:
+    raw = os.getenv(name, "")
+    items = [item.strip() for item in raw.split(",") if item.strip()]
+    return items or list(default)
+
+
+def _targets(preferred: str | None = None) -> list[_Target]:
+    bifrost_url = os.getenv("BIFROST_BASE_URL", "").strip()
+    if bifrost_url:
+        key = os.getenv("BIFROST_API_KEY", "").strip() or "bifrost"
+        return [
+            _Target(f"bifrost:{m}", bifrost_url, key, m)
+            for m in _csv_env("BIFROST_MODELS", DEFAULT_BIFROST_MODELS)
+        ]
+    targets: list[_Target] = []
+    groq_key = os.getenv("GROQ_API_KEY", "").strip()
+    if groq_key:
+        models = _csv_env("GROQ_MODELS", DEFAULT_GROQ_MODELS)
+        if preferred:
+            models = [preferred] + [m for m in models if m != preferred]
+        targets += [_Target(f"groq:{m}", GROQ_BASE_URL, groq_key, m) for m in models]
+    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if gemini_key:
+        targets += [
+            _Target(f"gemini:{m}", GEMINI_BASE_URL, gemini_key, m)
+            for m in _csv_env("GEMINI_MODELS", DEFAULT_GEMINI_MODELS)
+        ]
+    return targets
+
+
+def _on_cooldown(label: str) -> bool:
+    with _cooldown_lock:
+        return _cooldowns.get(label, 0) > time.monotonic()
+
+
+def _note_failure(target: _Target, error: Exception) -> None:
+    LOGGER.warning("%s failed: %s", target.label, error)
+    if _is_rate_limit_error(error):
+        with _cooldown_lock:
+            _cooldowns[target.label] = time.monotonic() + COOLDOWN_SECONDS
+
+
+def _usable_targets(preferred: str | None) -> list[_Target]:
+    targets = _targets(preferred)
+    ready = [t for t in targets if not _on_cooldown(t.label)]
+    return ready or targets  # if everything is cooling down, try anyway
+
+
+def _client_for(target: _Target) -> OpenAI:
+    return OpenAI(
+        api_key=target.api_key,
+        base_url=target.base_url,
+        timeout=LLM_TIMEOUT_SECONDS,
+        max_retries=0,
+    )
+
+
+def _no_tool_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
+    patched = [dict(m) for m in messages]
+    if patched and patched[0]["role"] == "system":
+        patched[0]["content"] += NO_TOOLS_NOTE
+    else:
+        patched.insert(0, {"role": "system", "content": NO_TOOLS_NOTE.strip()})
+    return patched
+
+
+def _should_retry_same_target(error: Exception) -> bool:
+    # 429 -> move to the next model immediately instead of waiting.
+    return _is_transient_provider_error(error) and not _is_rate_limit_error(error)
+
+
+def _final_error(failures: list[Exception]) -> RuntimeError:
+    if failures and all(_is_rate_limit_error(e) for e in failures):
+        return RuntimeError(
+            "The AI service is rate-limited right now. Please wait a moment "
+            "and try again."
+        )
+    return RuntimeError(LLM_UNAVAILABLE_MESSAGE)
+
 
 def _provider_request(request: Callable[[], Any]) -> Any:
     for attempt in range(MAX_PROVIDER_RETRIES + 1):
         try:
             return request()
         except (OpenAIError, TimeoutError) as error:
-            if (
-                attempt == MAX_PROVIDER_RETRIES
-                or not _is_transient_provider_error(error)
-            ):
+            if attempt == MAX_PROVIDER_RETRIES or not _should_retry_same_target(error):
                 raise
-            LOGGER.warning(
-                "Provider request temporarily failed; retrying attempt %s of %s.",
-                attempt + 1,
-                MAX_PROVIDER_RETRIES,
-            )
             time.sleep(_retry_delay(error, attempt))
     raise RuntimeError("Provider retry loop ended unexpectedly.")
 
 
-def call_llm(
-    messages: list[dict[str, str]],
-    *,
-    model: str = MODEL,
-) -> Any:
-    """Call Groq directly, falling back to Gemini if Groq fails."""
+def call_llm(messages: list[dict[str, str]], *, model: str = MODEL) -> Any:
+    """Try each configured model in order; skip ones that are rate-limited."""
+    messages = _no_tool_messages(messages)
     failures: list[Exception] = []
-    groq_api_key = os.getenv("GROQ_API_KEY")
-    if groq_api_key:
+    for target in _usable_targets(model):
+        client = _client_for(target)
         try:
-            client = OpenAI(
-                api_key=groq_api_key,
-                base_url=GROQ_BASE_URL,
-                timeout=LLM_TIMEOUT_SECONDS,
-                max_retries=0,
-            )
             return _provider_request(
                 lambda: client.chat.completions.create(
-                    model=model,
-                    messages=messages,
+                    model=target.model, messages=messages
                 )
             )
         except (OpenAIError, TimeoutError) as error:
-            LOGGER.warning("Groq request failed: %s", error)
+            _note_failure(target, error)
             failures.append(error)
-    else:
-        LOGGER.warning("Groq request skipped because GROQ_API_KEY is not configured.")
-
-    gemini_api_key = os.getenv("GEMINI_API_KEY")
-    if gemini_api_key:
-        try:
-            client = OpenAI(
-                api_key=gemini_api_key,
-                base_url=GEMINI_BASE_URL,
-                timeout=LLM_TIMEOUT_SECONDS,
-                max_retries=0,
-            )
-            return _provider_request(
-                lambda: client.chat.completions.create(
-                    model=GEMINI_MODEL,
-                    messages=messages,
-                )
-            )
-        except (OpenAIError, TimeoutError) as error:
-            LOGGER.warning("Gemini request failed: %s", error)
-            failures.append(error)
-    else:
-        LOGGER.warning(
-            "Gemini request skipped because GEMINI_API_KEY is not configured."
-        )
-
-    if failures and all(_is_rate_limit_error(error) for error in failures):
-        raise RuntimeError(
-            "The AI service is rate-limited right now. Please wait a moment "
-            "and try again."
-        ) from failures[-1]
-    if failures:
-        raise RuntimeError(LLM_UNAVAILABLE_MESSAGE) from failures[-1]
-    raise RuntimeError(LLM_UNAVAILABLE_MESSAGE)
+    raise _final_error(failures) from (failures[-1] if failures else None)
 
 
-def _stream_provider(
-    client: OpenAI,
-    messages: list[dict[str, str]],
-    model: str,
-) -> Iterator[str]:
+def _stream_provider(client: OpenAI, messages: list[dict[str, str]], model: str) -> Iterator[str]:
     for attempt in range(MAX_PROVIDER_RETRIES + 1):
         yielded = False
         try:
             stream = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                stream=True,
+                model=model, messages=messages, stream=True
             )
             for event in stream:
                 try:
@@ -244,74 +298,29 @@ def _stream_provider(
                     yield content
             return
         except (OpenAIError, TimeoutError) as error:
-            if yielded:
+            if yielded:  # text already shown, can't switch models mid-answer
                 raise RuntimeError(LLM_UNAVAILABLE_MESSAGE) from error
-            if (
-                attempt == MAX_PROVIDER_RETRIES
-                or not _is_transient_provider_error(error)
-            ):
+            if attempt == MAX_PROVIDER_RETRIES or not _should_retry_same_target(error):
                 raise
-            LOGGER.warning(
-                "Provider stream temporarily failed; retrying attempt %s of %s.",
-                attempt + 1,
-                MAX_PROVIDER_RETRIES,
-            )
             time.sleep(_retry_delay(error, attempt))
     raise RuntimeError("Provider stream retry loop ended unexpectedly.")
 
 
-def stream_llm(
-    messages: list[dict[str, str]],
-    *,
-    model: str = MODEL,
-) -> Iterator[str]:
-    """Stream completion text, falling back from Groq to Gemini if needed."""
+def stream_llm(messages: list[dict[str, str]], *, model: str = MODEL) -> Iterator[str]:
+    """Stream from the first working model; fail over before any text is sent."""
+    messages = _no_tool_messages(messages)
     failures: list[Exception] = []
-    groq_api_key = os.getenv("GROQ_API_KEY")
-    if groq_api_key:
+    for target in _usable_targets(model):
         try:
-            client = OpenAI(
-                api_key=groq_api_key,
-                base_url=GROQ_BASE_URL,
-                timeout=LLM_TIMEOUT_SECONDS,
-                max_retries=0,
-            )
-            yield from _stream_provider(client, messages, model)
+            yield from _stream_provider(_client_for(target), messages, target.model)
             return
         except (OpenAIError, TimeoutError) as error:
-            LOGGER.warning("Groq streaming request failed: %s", error)
+            _note_failure(target, error)
             failures.append(error)
-    else:
-        LOGGER.warning("Groq streaming skipped because GROQ_API_KEY is not configured.")
+    raise _final_error(failures) from (failures[-1] if failures else None)
 
-    gemini_api_key = os.getenv("GEMINI_API_KEY")
-    if gemini_api_key:
-        try:
-            client = OpenAI(
-                api_key=gemini_api_key,
-                base_url=GEMINI_BASE_URL,
-                timeout=LLM_TIMEOUT_SECONDS,
-                max_retries=0,
-            )
-            yield from _stream_provider(client, messages, GEMINI_MODEL)
-            return
-        except (OpenAIError, TimeoutError) as error:
-            LOGGER.warning("Gemini streaming request failed: %s", error)
-            if _is_rate_limit_error(error):
-                raise RuntimeError(
-                    "The AI service is rate-limited right now. Please wait a "
-                    "moment and try again."
-                ) from error
-            raise RuntimeError(LLM_UNAVAILABLE_MESSAGE) from error
-    LOGGER.warning(
-        "Gemini streaming skipped because GEMINI_API_KEY is not configured."
-    )
-    if failures and all(_is_rate_limit_error(error) for error in failures):
-        raise RuntimeError(
-            "The AI service is rate-limited right now. Please wait a moment "
-            "and try again."
-        ) from failures[-1]
-    raise RuntimeError(LLM_UNAVAILABLE_MESSAGE)
+
+
 
 
 def _decode_json(response: str) -> Any:

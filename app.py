@@ -21,9 +21,9 @@ from agent import run_research_stream, transcribe_audio
 
 def _load_streamlit_secrets_into_environment() -> None:
     for name in (
-        "TAVILY_API_KEY",
-        "GROQ_API_KEY",
-        "GEMINI_API_KEY",
+        "TAVILY_API_KEY", "GROQ_API_KEY", "GEMINI_API_KEY",
+        "BIFROST_BASE_URL", "BIFROST_API_KEY",
+        "BIFROST_MODELS", "GROQ_MODELS", "GEMINI_MODELS",
     ):
         if os.getenv(name, "").strip():
             continue
@@ -33,7 +33,7 @@ def _load_streamlit_secrets_into_environment() -> None:
             continue
         if value is not None and str(value).strip():
             os.environ[name] = str(value)
-            _load_streamlit_secrets_into_environment()
+            
 
 CHAT_PLACEHOLDERS = (
     "Ask me anything...",
@@ -440,7 +440,7 @@ def _render_conversation(messages: list[dict]) -> None:
             )
 
 
-st.set_page_config(page_title="VYOM", layout="wide")
+st.set_page_config(page_title="VYOM", layout="wide", initial_sidebar_state="collapsed")
 st.markdown(
     """
     <style>
@@ -553,27 +553,29 @@ st.markdown(
         font-size: 1.65rem;
         font-weight: 700;
     }
+    .st-key-app_title {
+        position: fixed;
+        top: 0.55rem;
+        left: 3.4rem;
+        z-index: 1000;
+    }
 
     .st-key-app_title div[data-testid="stMarkdownContainer"] h1 {
         margin: 0;
+        padding: 0;
         font-family: "Cormorant Garamond", Georgia, serif;
-        font-size: clamp(48px, 7vw, 72px);
+        font-size: 1.6rem;
         font-style: italic;
         font-weight: 600;
-        letter-spacing: 0.2em;
+        letter-spacing: 0.18em;
         line-height: 1;
         text-transform: uppercase;
     }
 
-    .st-key-app_title div[data-testid="stMarkdownContainer"] h1::after {
-        display: block;
-        width: min(8rem, 35%);
-        height: 2px;
-        margin-top: 0.35rem;
-        background: linear-gradient(90deg, currentColor, transparent);
-        content: "";
-        opacity: 0.55;
+    section.main > div {
+        padding-top: 3.5rem;
     }
+
 
     div[data-testid="stMarkdownContainer"] h2 {
         font-size: 1.35rem;
@@ -684,11 +686,6 @@ st.markdown(
         border-radius: 10px;
         font-size: 1.2rem;
     }
-
-    .st-key-new_chat_top {
-        margin-top: -1rem;
-    }
-
     div[class*="_actions"] button span[data-testid="stIconMaterial"] {
         color: #ffffff;
         font-variation-settings: "FILL" 1;
@@ -703,17 +700,12 @@ st.markdown(
         section.main > div {
             width: 100%;
             max-width: 100%;
-            padding: 0.75rem 0.5rem 5rem;
+            padding: 3.5rem 0.5rem 5rem;;
         }
 
         div[data-testid="stChatInput"] {
             width: 100% !important;
             max-width: 100% !important;
-        }
-
-        .st-key-app_title div[data-testid="stMarkdownContainer"] h1 {
-            font-size: clamp(40px, 10vw, 56px);
-            letter-spacing: 0.15em;
         }
 
         div[class*="_actions"] button {
@@ -740,17 +732,23 @@ if "greeting" not in st.session_state:
 if "chat_placeholder" not in st.session_state:
     st.session_state["chat_placeholder"] = random.choice(CHAT_PLACEHOLDERS)
 st.session_state.setdefault("generation_active", False)
-title_column, new_chat_column = st.columns([0.95, 0.05])
-with title_column:
-    with st.container(key="app_title"):
-        st.title("VYOM")
-with new_chat_column:
-    if st.button("✎", key="new_chat_top", help="New chat"):
-        _start_new_chat()
-        st.rerun()
-
 st.session_state.setdefault("messages", [])
 messages = st.session_state["messages"]
+
+with st.container(key="app_title"):
+    st.title("VYOM")
+
+with st.sidebar:
+    st.subheader("Current chat")
+    if st.button("New chat", key="new_chat_top", icon=":material/edit:"):
+        _start_new_chat()
+        st.rerun()
+    user_turns = [m["content"] for m in messages if m.get("role") == "user"]
+    if user_turns:
+        for text in user_turns:
+            st.caption(text[:60] + ("…" if len(text) > 60 else ""))
+    else:
+        st.caption("No messages yet.")
 if messages:
     _render_conversation(messages)
 else:
