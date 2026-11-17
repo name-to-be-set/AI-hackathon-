@@ -1,12 +1,16 @@
 import base64
+import hmac
 import html
 import os
 import random
 import re
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from io import BytesIO
 from zoneinfo import ZoneInfo
 
+import requests
 import streamlit as st
 from openai import OpenAIError
 from reportlab.lib.enums import TA_LEFT
@@ -24,6 +28,7 @@ def _load_streamlit_secrets_into_environment() -> None:
         "TAVILY_API_KEY", "GROQ_API_KEY", "GEMINI_API_KEY",
         "BIFROST_BASE_URL", "BIFROST_API_KEY",
         "BIFROST_MODELS", "GROQ_MODELS", "GEMINI_MODELS",
+        "ADMIN_PASSWORD",
     ):
         if os.getenv(name, "").strip():
             continue
@@ -33,7 +38,7 @@ def _load_streamlit_secrets_into_environment() -> None:
             continue
         if value is not None and str(value).strip():
             os.environ[name] = str(value)
-            
+
 
 CHAT_PLACEHOLDERS = (
     "Ask me anything...",
@@ -65,6 +70,59 @@ TIME_GREETING_LINES = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Like / dislike storage
+# ---------------------------------------------------------------------------
+@st.cache_resource
+def _feedback_store() -> dict[str, dict[str, dict]]:
+    """Shared across all visitors while the server is running.
+
+    Two variables: "like" and "dislike". Each maps message id -> details.
+    (Resets when the app restarts.)
+    """
+    return {"like": {}, "dislike": {}}
+
+
+def _set_feedback(message: dict, choice: str, question: str, reply: str) -> None:
+    store = _feedback_store()
+    message_id = message.setdefault("id", uuid.uuid4().hex)
+    new_value = "none" if message.get("feedback") == choice else choice
+    message["feedback"] = new_value
+
+    # Only one of like / dislike can be on.
+    store["like"].pop(message_id, None)
+    store["dislike"].pop(message_id, None)
+    if new_value in ("like", "dislike"):
+        store[new_value][message_id] = {
+            "time": datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d %H:%M"),
+            "question": question[:300],
+            "reply": reply[:500],
+        }
+
+
+def _render_admin_panel() -> None:
+    """Hidden panel: open the app with ?admin=1 in the URL, then enter the password."""
+    if st.query_params.get("admin") != "1":
+        return
+    with st.expander("Admin", expanded=False):
+        expected = os.getenv("ADMIN_PASSWORD", "").strip()
+        if not expected:
+            st.caption("Set ADMIN_PASSWORD to enable this panel.")
+            return
+        entered = st.text_input("Password", type="password", key="admin_password")
+        if not hmac.compare_digest(entered.encode(), expected.encode()):
+            return
+        store = _feedback_store()
+        for kind, title in (("like", "Likes"), ("dislike", "Dislikes")):
+            rows = list(store[kind].values())
+            st.markdown(f"**{title} ({len(rows)})**")
+            if rows:
+                st.dataframe(rows, hide_index=True, width="stretch")
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 def _start_new_chat() -> None:
     st.session_state["messages"] = []
     st.session_state["greeting"] = _time_greeting()
@@ -152,10 +210,42 @@ def _build_pdf(report: str, sources: list[dict]) -> bytes:
     return buffer.getvalue()
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_image_bytes(url: str) -> bytes | None:
+    """Download an image on the server so sites that block hot-linking still work.
+
+    Returns None for anything that is not a real image, so no broken icon is shown.
+    """
+    try:
+        response = requests.get(
+            url,
+            timeout=6,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+                ),
+                "Accept": "image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8",
+            },
+        )
+        response.raise_for_status()
+    except requests.RequestException:
+        return None
+    content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if (
+        not content_type.startswith("image/")
+        or content_type == "image/svg+xml"
+        or not response.content
+        or len(response.content) > 5_000_000
+    ):
+        return None
+    return response.content
+
+
 def _render_images(images: object) -> None:
     if not isinstance(images, list):
         return
-    valid_images = []
+    pending = []
     for image in images[:4]:
         if not isinstance(image, dict):
             continue
@@ -163,14 +253,27 @@ def _render_images(images: object) -> None:
         url = image.get("url")
         encoded = image.get("base64")
         if isinstance(url, str) and url.startswith(("https://", "http://")):
-            valid_images.append((url, description))
+            pending.append((url, None, description))
         elif isinstance(encoded, str):
             try:
-                valid_images.append(
-                    (base64.b64decode(encoded, validate=True), description)
-                )
+                pending.append((None, base64.b64decode(encoded, validate=True), description))
             except ValueError:
                 continue
+
+    if not pending:
+        return
+
+    urls = [url for url, _, _ in pending if url]
+    fetched: dict[str, bytes | None] = {}
+    if urls:
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            fetched = dict(zip(urls, executor.map(_fetch_image_bytes, urls)))
+
+    valid_images = []
+    for url, data, description in pending:
+        image_data = data if url is None else fetched.get(url)
+        if image_data:
+            valid_images.append((image_data, description))
 
     if not valid_images:
         return
@@ -186,111 +289,91 @@ def _render_images(images: object) -> None:
 def _render_reply_actions(
     message: dict,
     key_prefix: str,
+    question: str = "",
 ) -> None:
     result = message.get("result")
     report = result.get("report") if isinstance(result, dict) else message.get("error")
     if not isinstance(report, str) or not report.strip():
         return
     report = _visible_report(report)
+    feedback = message.get("feedback")
 
-    with st.container(key=f"{key_prefix}_actions"):
-        (
-            like_column,
-            dislike_column,
-            share_column,
-            copy_column,
-        ) = st.columns([1, 1, 1, 1], gap="small")
-        with like_column:
-            if st.button(
-                "Like",
-                icon=":material/thumb_up_off_alt:",
-                key=f"{key_prefix}_like",
-                help="Mark this as a good reply",
-                type=(
-                    "primary"
-                    if message.get("feedback") == "like"
-                    else "tertiary"
-                ),
-                use_container_width=True,
-            ):
-                message["feedback"] = (
-                    "none" if message.get("feedback") == "like" else "like"
-                )
-                st.rerun()
-        with dislike_column:
-            if st.button(
-                "Dislike",
-                icon=":material/thumb_down_off_alt:",
-                key=f"{key_prefix}_dislike",
-                help="Mark this as a bad reply",
-                type=(
-                    "primary"
-                    if message.get("feedback") == "dislike"
-                    else "tertiary"
-                ),
-                use_container_width=True,
-            ):
-                message["feedback"] = (
-                    "none" if message.get("feedback") == "dislike" else "dislike"
-                )
-                st.rerun()
-        with share_column:
-            if st.button(
-                "Share",
-                key=f"{key_prefix}_share",
-                type="tertiary",
-                use_container_width=True,
-            ):
-                st.session_state["share_message"] = key_prefix
-        with copy_column:
-            encoded_report = base64.b64encode(report.encode("utf-8")).decode("ascii")
-            st.html(
-                f"""
-                <button id="copy-reply-{key_prefix}" type="button" aria-label="Copy reply"
-                    style="display:flex;align-items:center;justify-content:center;
-                    width:100%;height:40px;box-sizing:border-box;background:transparent;
-                    border:0;color:#e5e7eb;font:inherit;padding:0 8px;cursor:pointer;
-                    white-space:nowrap;">
-                    Copy
-                </button>
-                <script>
-                (() => {{
-                    const button = document.getElementById("copy-reply-{key_prefix}");
-                    const text = new TextDecoder().decode(
-                        Uint8Array.from(atob("{encoded_report}"), character =>
-                            character.charCodeAt(0))
-                    );
-                    let resetTimer;
-                    const showCopied = () => {{
-                        button.textContent = "Copied";
-                        clearTimeout(resetTimer);
-                        resetTimer = setTimeout(() => {{
-                            button.textContent = "Copy";
-                        }}, 1500);
-                    }};
-                    button.addEventListener("click", async () => {{
-                        try {{
-                            await navigator.clipboard.writeText(text);
+    with st.container(
+        key=f"{key_prefix}_actions",
+        horizontal=True,
+        vertical_alignment="center",
+        gap="small",
+    ):
+        # Icon-only buttons. Active = filled white icon, inactive = dim outline icon.
+        st.button(
+            "\u200b",
+            icon=":material/thumb_up:" if feedback == "like" else ":material/thumb_up_off_alt:",
+            key=f"{key_prefix}_like",
+            help="Good reply",
+            type="primary" if feedback == "like" else "tertiary",
+            on_click=_set_feedback,
+            args=(message, "like", question, report),
+        )
+        st.button(
+            "\u200b",
+            icon=":material/thumb_down:" if feedback == "dislike" else ":material/thumb_down_off_alt:",
+            key=f"{key_prefix}_dislike",
+            help="Bad reply",
+            type="primary" if feedback == "dislike" else "tertiary",
+            on_click=_set_feedback,
+            args=(message, "dislike", question, report),
+        )
+        if st.button("Share", key=f"{key_prefix}_share", type="tertiary"):
+            st.session_state["share_message"] = key_prefix
+
+        encoded_report = base64.b64encode(report.encode("utf-8")).decode("ascii")
+        st.html(
+            f"""
+            <button id="copy-reply-{key_prefix}" type="button" aria-label="Copy reply"
+                style="display:flex;align-items:center;justify-content:center;
+                height:40px;box-sizing:border-box;background:transparent;
+                border:0;color:#e5e7eb;font:inherit;font-size:0.9rem;padding:0 8px;
+                cursor:pointer;white-space:nowrap;">
+                Copy
+            </button>
+            <script>
+            (() => {{
+                const button = document.getElementById("copy-reply-{key_prefix}");
+                const text = new TextDecoder().decode(
+                    Uint8Array.from(atob("{encoded_report}"), character =>
+                        character.charCodeAt(0))
+                );
+                let resetTimer;
+                const showCopied = () => {{
+                    button.textContent = "Copied";
+                    clearTimeout(resetTimer);
+                    resetTimer = setTimeout(() => {{
+                        button.textContent = "Copy";
+                    }}, 1500);
+                }};
+                button.addEventListener("click", async () => {{
+                    try {{
+                        await navigator.clipboard.writeText(text);
+                        showCopied();
+                    }} catch {{
+                        const input = document.createElement("textarea");
+                        input.value = text;
+                        document.body.appendChild(input);
+                        input.select();
+                        const copied = document.execCommand("copy");
+                        input.remove();
+                        if (copied) {{
                             showCopied();
-                        }} catch {{
-                            const input = document.createElement("textarea");
-                            input.value = text;
-                            document.body.appendChild(input);
-                            input.select();
-                            const copied = document.execCommand("copy");
-                            input.remove();
-                            if (copied) {{
-                                showCopied();
-                            }} else {{
-                                button.textContent = "Copy unavailable";
-                            }}
+                        }} else {{
+                            button.textContent = "Copy unavailable";
                         }}
-                    }});
-                }})();
-                </script>
-                """,
-                unsafe_allow_javascript=True,
-            )
+                    }}
+                }});
+            }})();
+            </script>
+            """,
+            unsafe_allow_javascript=True,
+        )
 
     if isinstance(result, dict):
         sources = result.get("sources")
@@ -413,6 +496,10 @@ def _render_conversation(messages: list[dict]) -> None:
                 st.markdown(message["content"])
             continue
 
+        question = ""
+        if index > 0 and messages[index - 1].get("role") == "user":
+            question = str(messages[index - 1].get("content", ""))
+
         with st.chat_message("assistant"):
             if progress := message.get("progress"):
                 with st.expander(
@@ -437,6 +524,7 @@ def _render_conversation(messages: list[dict]) -> None:
             _render_reply_actions(
                 message,
                 key_prefix=f"chat_{index}",
+                question=question,
             )
 
 
@@ -446,49 +534,130 @@ st.markdown(
     <style>
     @import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=DM+Sans:wght@400;500;600;700&display=swap");
 
+    :root {
+        /* Tune these two if the pause button is not exactly on top of the send arrow */
+        --stop-right: 1.9rem;
+        --stop-bottom: 1.45rem;
+    }
+
     .stApp {
         font-family: "DM Sans", "Segoe UI", system-ui, sans-serif;
     }
 
-    section.main > div {
+    /* ---- No sideways scrolling anywhere on the page ---- */
+    html, body, .stApp,
+    [data-testid="stAppViewContainer"],
+    [data-testid="stMain"],
+    section.main {
+        max-width: 100vw;
+        overflow-x: hidden;
+    }
+
+    section.main > div,
+    [data-testid="stMainBlockContainer"] {
         width: 100%;
         max-width: none;
         margin-inline: auto;
         padding-inline: 1.25rem;
+        padding-top: 3.5rem;
     }
 
-    div[class*="_actions"] div[data-testid="stHorizontalBlock"] {
-        flex-direction: row !important;
+    [data-testid="stMarkdownContainer"] {
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+
+    [data-testid="stMarkdownContainer"] pre {
+        white-space: pre-wrap;
+    }
+
+    [data-testid="stMarkdownContainer"] img,
+    [data-testid="stImage"] img {
+        max-width: 100%;
+        height: auto;
+    }
+
+    /* ---- Tables: the ONLY thing that scrolls sideways, and a bit tighter ---- */
+    [data-testid="stMarkdownContainer"] table {
+        display: block;
+        width: max-content;
+        max-width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        border-collapse: collapse;
+        font-size: 0.85rem;
+    }
+
+    [data-testid="stMarkdownContainer"] th,
+    [data-testid="stMarkdownContainer"] td {
+        padding: 0.3rem 0.55rem !important;
+        min-width: 5.5rem;
+        overflow-wrap: normal;
+        word-break: normal;
+        vertical-align: top;
+    }
+
+    /* ---- App name (sits right after the sidebar arrow) ---- */
+    header[data-testid="stHeader"] {
+        background: transparent;
+    }
+
+    .st-key-app_title {
+        position: fixed;
+        top: 0.55rem;
+        left: 3.6rem;
+        z-index: 1000002;
+        pointer-events: none;
+    }
+
+    .st-key-app_title div[data-testid="stMarkdownContainer"] h1 {
+        margin: 0;
+        padding: 0;
+        font-family: "Cormorant Garamond", Georgia, serif;
+        font-size: 1.6rem;
+        font-style: italic;
+        font-weight: 600;
+        letter-spacing: 0.18em;
+        line-height: 1;
+        text-transform: uppercase;
+        white-space: nowrap;
+    }
+
+    /* ---- Reply action row: icon-only like / dislike ---- */
+    div[class*="_actions"] {
         flex-wrap: nowrap !important;
         gap: 0.15rem !important;
-    }
-
-    div[class*="_actions"] div[data-testid="stColumn"] {
-        width: auto !important;
-        flex: 0 0 auto !important;
-        min-width: 0 !important;
-        padding-inline: 0 !important;
     }
 
     div[class*="_actions"] button {
         min-width: 0 !important;
         white-space: nowrap !important;
-        padding-inline: 0.35rem !important;
-        font-size: 0.78rem !important;
-    }
-
-    div[class*="_actions"] div[data-testid="stHorizontalBlock"] > div:nth-child(-n+2) button {
-        min-width: 2.4rem !important;
-        padding-inline: 0.35rem !important;
-        color: rgba(255, 255, 255, 0.78);
-    }
-
-    div[class*="_actions"] div[data-testid="stHorizontalBlock"] > div:nth-child(-n+2) button[kind="primary"] {
-        color: #ffffff !important;
+        padding-inline: 0.4rem !important;
+        font-size: 0.85rem !important;
         background: transparent !important;
         border-color: transparent !important;
     }
 
+    div[class*="_like"] button,
+    div[class*="_dislike"] button {
+        min-width: 2.4rem !important;
+    }
+
+    /* off: dim outline icon */
+    div[class*="_like"] button[data-testid="stBaseButton-tertiary"] span[data-testid="stIconMaterial"],
+    div[class*="_dislike"] button[data-testid="stBaseButton-tertiary"] span[data-testid="stIconMaterial"] {
+        color: rgba(255, 255, 255, 0.55);
+        font-variation-settings: "FILL" 0;
+    }
+
+    /* on: solid white icon */
+    div[class*="_like"] button[data-testid="stBaseButton-primary"] span[data-testid="stIconMaterial"],
+    div[class*="_dislike"] button[data-testid="stBaseButton-primary"] span[data-testid="stIconMaterial"] {
+        color: #ffffff;
+        font-variation-settings: "FILL" 1;
+    }
+
+    /* ---- Chat messages ---- */
     div[data-testid="stChatMessage"] [data-testid="stChatMessageAvatar"] {
         display: none !important;
     }
@@ -528,54 +697,10 @@ st.markdown(
         filter: drop-shadow(0 0 0.8rem rgba(255, 255, 255, 0.28));
     }
 
-    .st-key-stop_generation {
-        position: fixed;
-        z-index: 1001;
-        right: max(calc((100vw - 520px) / 2 + 80px), 5.5rem);
-        bottom: 1rem;
-    }
-
-    .st-key-stop_generation button {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 32px;
-        height: 32px;
-        min-height: 32px;
-        padding: 0;
-        border-radius: 50%;
-        color: #ffffff;
-        background: transparent;
-        border-color: transparent;
-    }
-
     div[data-testid="stMarkdownContainer"] h1 {
         font-size: 1.65rem;
         font-weight: 700;
     }
-    .st-key-app_title {
-        position: fixed;
-        top: 0.55rem;
-        left: 3.4rem;
-        z-index: 1000;
-    }
-
-    .st-key-app_title div[data-testid="stMarkdownContainer"] h1 {
-        margin: 0;
-        padding: 0;
-        font-family: "Cormorant Garamond", Georgia, serif;
-        font-size: 1.6rem;
-        font-style: italic;
-        font-weight: 600;
-        letter-spacing: 0.18em;
-        line-height: 1;
-        text-transform: uppercase;
-    }
-
-    section.main > div {
-        padding-top: 3.5rem;
-    }
-
 
     div[data-testid="stMarkdownContainer"] h2 {
         font-size: 1.35rem;
@@ -596,6 +721,42 @@ st.markdown(
         outline-offset: 2px;
     }
 
+    /* ---- Pause button: sits exactly where the send arrow is ---- */
+    .st-key-stop_generation {
+        position: fixed;
+        z-index: 1001;
+        right: var(--stop-right);
+        bottom: var(--stop-bottom);
+    }
+
+    .st-key-stop_generation button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        min-height: 32px;
+        padding: 0;
+        border-radius: 50%;
+        color: #ffffff;
+        background: rgba(255, 255, 255, 0.14);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+    }
+
+    /* ---- Search box: keeps its left start, stretches to the right border ---- */
+    div[data-testid="stBottomBlockContainer"] {
+        max-width: none !important;
+        padding-inline: 1.25rem !important;
+    }
+
+    div[data-testid="stChatInput"] {
+        width: calc(100% - max(0px, (100% - 520px) / 2)) !important;
+        max-width: none !important;
+        margin-left: max(0px, calc((100% - 520px) / 2)) !important;
+        margin-right: 0 !important;
+        padding: 0 !important;
+    }
+
     .st-key-chat_input button {
         width: 32px;
         height: 32px;
@@ -611,13 +772,6 @@ st.markdown(
     .st-key-chat_input button:hover:not(:disabled) {
         border-color: color-mix(in srgb, currentColor 36%, transparent);
         background: color-mix(in srgb, currentColor 13%, transparent);
-    }
-
-    div[data-testid="stChatInput"] {
-        width: min(100%, 520px) !important;
-        max-width: 520px !important;
-        margin-inline: auto !important;
-        padding: 0 !important;
     }
 
     div[data-testid="stChatInput"] > div {
@@ -662,6 +816,32 @@ st.markdown(
             0 8px 28px color-mix(in srgb, currentColor 10%, transparent) !important;
     }
 
+    /* ---- Scroll-to-latest arrow (above the search box, middle of screen) ---- */
+    #vyom-scroll-down {
+        position: fixed;
+        left: 50%;
+        bottom: 5.5rem;
+        transform: translateX(-50%);
+        z-index: 1000;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        border-radius: 50%;
+        border: 1px solid rgba(255, 255, 255, 0.28);
+        color: #ffffff;
+        background: rgba(30, 30, 34, 0.92);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+        cursor: pointer;
+    }
+
+    #vyom-scroll-down.show {
+        display: flex;
+    }
+
+    /* ---- Sidebar ---- */
     section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
         justify-content: flex-start;
         text-align: left;
@@ -675,51 +855,31 @@ st.markdown(
         justify-content: flex-start !important;
     }
 
-    section[data-testid="stSidebar"] div[data-testid="stButton"] > button[kind="primary"] {
-        background: rgba(255, 255, 255, 0.12);
-        border-color: rgba(255, 255, 255, 0.2);
-        color: #ffffff;
-    }
-
     .st-key-new_chat_top button {
         min-width: 38px;
         border-radius: 10px;
         font-size: 1.2rem;
     }
-    div[class*="_actions"] button span[data-testid="stIconMaterial"] {
-        color: #ffffff;
-        font-variation-settings: "FILL" 1;
-    }
-
-    div[data-testid="stChatMessage"] div[data-testid="stButton"] button {
-        border-color: transparent;
-        padding-inline: 0.4rem;
-    }
 
     @media (max-width: 640px) {
-        section.main > div {
-            width: 100%;
-            max-width: 100%;
-            padding: 3.5rem 0.5rem 5rem;;
+        section.main > div,
+        [data-testid="stMainBlockContainer"] {
+            padding: 3.5rem 0.5rem 5rem;
         }
 
+        div[data-testid="stBottomBlockContainer"] {
+            padding-inline: 0.5rem !important;
+        }
+
+        /* Full width search box on phones */
         div[data-testid="stChatInput"] {
             width: 100% !important;
-            max-width: 100% !important;
+            margin-left: 0 !important;
         }
 
-        div[class*="_actions"] button {
-            padding-inline: 0.15rem !important;
-            font-size: 0.72rem !important;
-        }
-
-        .st-key-stop_generation {
-            right: 5.5rem;
-            bottom: 1rem;
-        }
-
-        .st-key-new_chat_top {
-            margin-top: 0;
+        :root {
+            --stop-right: 1.2rem;
+            --stop-bottom: 1.1rem;
         }
     }
     </style>
@@ -749,6 +909,8 @@ with st.sidebar:
             st.caption(text[:60] + ("…" if len(text) > 60 else ""))
     else:
         st.caption("No messages yet.")
+    _render_admin_panel()
+
 if messages:
     _render_conversation(messages)
 else:
@@ -766,19 +928,49 @@ else:
                 unsafe_allow_html=True,
             )
 
-if st.session_state["generation_active"]:
-    st.button(
-        "⏸",
-        key="stop_generation",
-        help="Stop the current response",
-        on_click=_stop_generation,
-    )
+# Floating "scroll to latest message" arrow (created once per page load).
+st.html(
+    """
+    <script>
+    (() => {
+        if (window.__vyomScrollInit) return;
+        window.__vyomScrollInit = true;
+        const button = document.createElement("button");
+        button.id = "vyom-scroll-down";
+        button.type = "button";
+        button.setAttribute("aria-label", "Scroll to latest message");
+        button.innerHTML =
+            '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" ' +
+            'stroke="currentColor" stroke-width="2.4" stroke-linecap="round" ' +
+            'stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
+        document.body.appendChild(button);
+        const scroller = () =>
+            document.querySelector('[data-testid="stMain"]') ||
+            document.querySelector("section.main") ||
+            document.scrollingElement;
+        const update = () => {
+            const el = scroller();
+            if (!el) return;
+            const away = el.scrollHeight - el.scrollTop - el.clientHeight;
+            button.classList.toggle("show", away > 300);
+        };
+        button.addEventListener("click", () => {
+            const el = scroller();
+            if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+        });
+        document.addEventListener("scroll", update, true);
+        setInterval(update, 500);
+    })();
+    </script>
+    """,
+    unsafe_allow_javascript=True,
+)
 
 if prompt := st.chat_input(
     st.session_state["chat_placeholder"],
     key="chat_input",
     accept_audio=True,
-    width=520,
+    width="stretch",
 ):
     if isinstance(prompt, str):
         topic = prompt.strip()
@@ -811,6 +1003,21 @@ if prompt := st.chat_input(
             assistant_message = {"role": "assistant", "progress": progress_steps}
             messages.append(assistant_message)
             st.session_state["generation_active"] = True
+
+            # While the bot is working: hide the send arrow and show the pause
+            # button in its place (desktop and mobile).
+            st.markdown(
+                "<style>[data-testid='stChatInputSubmitButton']"
+                "{visibility:hidden !important;}</style>",
+                unsafe_allow_html=True,
+            )
+            st.button(
+                "⏸",
+                key="stop_generation",
+                help="Stop the current response",
+                on_click=_stop_generation,
+            )
+
             with st.chat_message("assistant"):
                 with st.expander(
                     "Thinking",
