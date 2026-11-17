@@ -21,6 +21,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 from streamlit.errors import StreamlitAPIException, StreamlitSecretNotFoundError
 
 from agent import run_research_stream, transcribe_audio
+from attachments import run_attachment_stream
 
 
 def _load_streamlit_secrets_into_environment() -> None:
@@ -123,19 +124,92 @@ def _render_admin_panel() -> None:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+SUGGESTIONS = (
+    "Explain how AI agents work",
+    "What's the latest AI news today?",
+    "Help me write a polite email",
+    "Give me tips to study better",
+)
+FILE_TYPES = ["pdf", "png", "jpg", "jpeg", "webp", "txt", "md", "csv"]
+
+
+def _new_chat() -> dict:
+    return {"id": uuid.uuid4().hex[:8], "title": "New chat", "messages": []}
+
+
+def _init_chats() -> None:
+    if "chats" not in st.session_state:
+        chat = _new_chat()
+        st.session_state["chats"] = [chat]
+        st.session_state["active_chat"] = chat["id"]
+
+
+def _active_chat() -> dict:
+    chats = st.session_state["chats"]
+    for chat in chats:
+        if chat["id"] == st.session_state.get("active_chat"):
+            return chat
+    return chats[0]
+
+
+def _active_messages() -> list[dict]:
+    return _active_chat()["messages"]
+
+
 def _start_new_chat() -> None:
-    st.session_state["messages"] = []
+    if _active_messages():
+        chat = _new_chat()
+        st.session_state["chats"].append(chat)
+        st.session_state["active_chat"] = chat["id"]
     st.session_state["greeting"] = _time_greeting()
     st.session_state["generation_active"] = False
     st.session_state.pop("share_message", None)
 
 
+def _switch_chat(chat_id: str) -> None:
+    st.session_state["active_chat"] = chat_id
+    st.session_state["generation_active"] = False
+    st.session_state.pop("share_message", None)
+
+
+def _use_suggestion(text: str) -> None:
+    st.session_state["pending_submission"] = {"topic": text, "files": []}
+
+
+def _regenerate() -> None:
+    messages = _active_messages()
+    while messages and messages[-1].get("role") == "assistant":
+        messages.pop()
+    if messages and messages[-1].get("role") == "user":
+        user_message = messages.pop()
+        st.session_state["pending_submission"] = {
+            "topic": user_message["content"],
+            "files": user_message.get("files", []),
+        }
+
+
 def _stop_generation() -> None:
     st.session_state["generation_active"] = False
-    for existing_message in reversed(st.session_state["messages"]):
+    for existing_message in reversed(_active_messages()):
         if existing_message.get("role") == "assistant":
             existing_message["generation_stopped"] = True
+            existing_message.pop("partial_report", None)
             break
+
+
+def _user_text(content: str, files: list | None) -> str:
+    names = [name for name, _, _ in files or []]
+    if not names:
+        return content
+    return content + "\n\n" + "  \n".join(f"📎 `{name}`" for name in names)
+
+
+def _loader_html(stage: str) -> str:
+    return (
+        '<div class="vyom-loader"><span class="vyom-dots">'
+        "<span></span><span></span><span></span></span>"
+        f"<span>{html.escape(stage)}</span></div>"
+    )
 
 
 def _time_greeting(hour: int | None = None) -> str:
@@ -290,6 +364,7 @@ def _render_reply_actions(
     message: dict,
     key_prefix: str,
     question: str = "",
+    is_last: bool = False,
 ) -> None:
     result = message.get("result")
     report = result.get("report") if isinstance(result, dict) else message.get("error")
@@ -323,6 +398,15 @@ def _render_reply_actions(
             on_click=_set_feedback,
             args=(message, "dislike", question, report),
         )
+        if is_last:
+            st.button(
+                "\u200b",
+                icon=":material/refresh:",
+                key=f"{key_prefix}_regen",
+                help="Regenerate",
+                type="tertiary",
+                on_click=_regenerate,
+            )
         if st.button("Share", key=f"{key_prefix}_share", type="tertiary"):
             st.session_state["share_message"] = key_prefix
 
@@ -410,7 +494,10 @@ def _conversation_history(messages: list[dict]) -> list[dict[str, str]]:
     history = []
     for message in messages:
         if message.get("role") == "user" and isinstance(message.get("content"), str):
-            history.append({"role": "user", "content": message["content"]})
+            content = message["content"]
+            if context := message.get("attachment_context"):
+                content += "\n\n[Attached content]\n" + str(context)[:6000]
+            history.append({"role": "user", "content": content})
         elif message.get("role") == "assistant":
             result = message.get("result")
             if isinstance(result, dict) and isinstance(result.get("report"), str):
@@ -492,15 +579,16 @@ def _render_result(result: dict, key_prefix: str = "result") -> None:
 def _render_conversation(messages: list[dict]) -> None:
     for index, message in enumerate(messages):
         if message.get("role") == "user":
-            with st.chat_message("user"):
-                st.markdown(message["content"])
+            with st.container(key=f"user_msg_{index}"):
+                st.markdown(_user_text(message["content"], message.get("files")))
             continue
 
         question = ""
         if index > 0 and messages[index - 1].get("role") == "user":
             question = str(messages[index - 1].get("content", ""))
+        is_last = index == len(messages) - 1
 
-        with st.chat_message("assistant"):
+        with st.container(key=f"assistant_msg_{index}"):
             if progress := message.get("progress"):
                 with st.expander(
                     "Thinking",
@@ -517,404 +605,312 @@ def _render_conversation(messages: list[dict]) -> None:
                     st.caption(detail)
             elif result := message.get("result"):
                 _render_result(result, key_prefix=f"chat_{index}")
-            elif partial_report := message.get("partial_report"):
-                st.markdown(_visible_report(partial_report))
-                if message.get("generation_stopped"):
-                    st.caption("Response stopped.")
+            elif message.get("generation_stopped"):
+                st.warning(
+                    "Response paused by your command.",
+                    icon=":material/pause_circle:",
+                )
+                if is_last:
+                    st.button(
+                        "\u200b",
+                        icon=":material/refresh:",
+                        key=f"chat_{index}_regen",
+                        help="Try again",
+                        type="tertiary",
+                        on_click=_regenerate,
+                    )
             _render_reply_actions(
                 message,
                 key_prefix=f"chat_{index}",
                 question=question,
+                is_last=is_last,
             )
 
 
 st.set_page_config(page_title="VYOM", layout="wide", initial_sidebar_state="collapsed")
-st.markdown(
-    """
-    <style>
-    @import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=DM+Sans:wght@400;500;600;700&display=swap");
 
-    :root {
-        /* Tune these two if the pause button is not exactly on top of the send arrow */
-        --stop-right: 1.9rem;
-        --stop-bottom: 1.45rem;
-    }
+BASE_CSS = """
+<style>
+@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=DM+Sans:wght@400;500;600;700&display=swap");
 
-    .stApp {
-        font-family: "DM Sans", "Segoe UI", system-ui, sans-serif;
-    }
+:root {
+    --vyom-fg: #e5e7eb;
+    --vyom-strong: #ffffff;
+    --vyom-dim: rgba(255, 255, 255, 0.55);
+    --vyom-soft: rgba(255, 255, 255, 0.08);
+    --vyom-border: rgba(255, 255, 255, 0.14);
+    --vyom-pop: rgba(30, 30, 34, 0.94);
+    /* Tune only if the pause button is not exactly on top of the send arrow */
+    --stop-right: 1.9rem;
+    --stop-bottom: 1.45rem;
+}
 
-    /* ---- No sideways scrolling anywhere on the page ---- */
-    html, body, .stApp,
-    [data-testid="stAppViewContainer"],
-    [data-testid="stMain"],
-    section.main {
-        max-width: 100vw;
-        overflow-x: hidden;
-    }
+.stApp { font-family: "DM Sans", "Segoe UI", system-ui, sans-serif; }
 
-    section.main > div,
-    [data-testid="stMainBlockContainer"] {
-        width: 100%;
-        max-width: none;
-        margin-inline: auto;
-        padding-inline: 1.25rem;
-        padding-top: 3.5rem;
-    }
+/* ---- No sideways scrolling anywhere (tables are the only exception) ---- */
+html, body, .stApp,
+[data-testid="stAppViewContainer"],
+[data-testid="stMain"],
+section.main { max-width: 100vw; overflow-x: hidden; }
 
-    [data-testid="stMarkdownContainer"] {
-        overflow-wrap: anywhere;
-        word-break: break-word;
-    }
+[data-testid="stMainBlockContainer"],
+section.main > div {
+    width: 100%;
+    max-width: none;
+    margin-inline: auto;
+    padding: 3.5rem 1.25rem 2rem;
+}
 
-    [data-testid="stMarkdownContainer"] pre {
-        white-space: pre-wrap;
-    }
+[data-testid="stMarkdownContainer"] { overflow-wrap: anywhere; word-break: break-word; }
+[data-testid="stMarkdownContainer"] pre { white-space: pre-wrap; }
+[data-testid="stMarkdownContainer"] img,
+[data-testid="stImage"] img { max-width: 100%; height: auto; }
 
-    [data-testid="stMarkdownContainer"] img,
-    [data-testid="stImage"] img {
-        max-width: 100%;
-        height: auto;
-    }
+[data-testid="stMarkdownContainer"] table {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+[data-testid="stMarkdownContainer"] th,
+[data-testid="stMarkdownContainer"] td {
+    padding: 0.3rem 0.55rem !important;
+    min-width: 5.5rem;
+    overflow-wrap: normal;
+    word-break: normal;
+    vertical-align: top;
+}
 
-    /* ---- Tables: the ONLY thing that scrolls sideways, and a bit tighter ---- */
-    [data-testid="stMarkdownContainer"] table {
-        display: block;
-        width: max-content;
-        max-width: 100%;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-        border-collapse: collapse;
-        font-size: 0.85rem;
-    }
+/* ---- App name next to the sidebar arrow ---- */
+header[data-testid="stHeader"] { background: transparent; }
+.st-key-app_title { position: fixed; top: 0.55rem; left: 3.6rem; z-index: 1000002; pointer-events: none; }
+.st-key-app_title div[data-testid="stMarkdownContainer"] h1 {
+    margin: 0; padding: 0;
+    font-family: "Cormorant Garamond", Georgia, serif;
+    font-size: 1.6rem; font-style: italic; font-weight: 600;
+    letter-spacing: 0.18em; line-height: 1; text-transform: uppercase; white-space: nowrap;
+}
 
-    [data-testid="stMarkdownContainer"] th,
-    [data-testid="stMarkdownContainer"] td {
-        padding: 0.3rem 0.55rem !important;
-        min-width: 5.5rem;
-        overflow-wrap: normal;
-        word-break: normal;
-        vertical-align: top;
-    }
+/* ---- Messages: no avatars; your bubble right, replies left ---- */
+[data-testid^="stChatMessageAvatar"] { display: none !important; }
 
-    /* ---- App name (sits right after the sidebar arrow) ---- */
-    header[data-testid="stHeader"] {
-        background: transparent;
-    }
+div[class*="st-key-user_msg_"] { align-items: flex-end; margin-bottom: 0.4rem; }
+div[class*="st-key-user_msg_"] [data-testid="stElementContainer"] {
+    width: fit-content;
+    max-width: 85%;
+    margin-left: auto;
+    padding: 0.6rem 0.9rem;
+    border: 1px solid var(--vyom-border);
+    border-radius: 1.1rem 1.1rem 0.25rem 1.1rem;
+    background: var(--vyom-soft);
+}
+div[class*="st-key-user_msg_"] p { margin: 0; }
 
-    .st-key-app_title {
-        position: fixed;
-        top: 0.55rem;
-        left: 3.6rem;
-        z-index: 1000002;
-        pointer-events: none;
-    }
+div[class*="st-key-assistant_msg_"] { width: 100%; min-width: 0; margin-bottom: 0.8rem; }
 
-    .st-key-app_title div[data-testid="stMarkdownContainer"] h1 {
-        margin: 0;
-        padding: 0;
-        font-family: "Cormorant Garamond", Georgia, serif;
-        font-size: 1.6rem;
-        font-style: italic;
-        font-weight: 600;
-        letter-spacing: 0.18em;
-        line-height: 1;
-        text-transform: uppercase;
-        white-space: nowrap;
-    }
+.greeting-text { font-size: clamp(2rem, 5vw, 3.4rem); font-weight: 600; line-height: 1.2; }
+.jasmine-flower {
+    flex: 0 0 auto; color: var(--vyom-strong);
+    font-size: clamp(3rem, 7vw, 5rem); line-height: 1;
+    filter: drop-shadow(0 0 0.8rem rgba(255, 255, 255, 0.28));
+}
 
-    /* ---- Reply action row: icon-only like / dislike ---- */
-    div[class*="_actions"] {
-        flex-wrap: nowrap !important;
-        gap: 0.15rem !important;
-    }
+div[data-testid="stMarkdownContainer"] h1 { font-size: 1.65rem; font-weight: 700; }
+div[data-testid="stMarkdownContainer"] h2 { font-size: 1.35rem; font-weight: 700; }
+div[data-testid="stMarkdownContainer"] h3 { font-size: 1.12rem; font-weight: 600; }
 
-    div[class*="_actions"] button {
-        min-width: 0 !important;
-        white-space: nowrap !important;
-        padding-inline: 0.4rem !important;
-        font-size: 0.85rem !important;
-        background: transparent !important;
-        border-color: transparent !important;
-    }
+/* ---- Starter chips ---- */
+.st-key-starter_chips button {
+    justify-content: flex-start;
+    text-align: left;
+    padding: 0.5rem 1rem;
+    border-radius: 999px;
+    border: 1px solid var(--vyom-border);
+    background: var(--vyom-soft);
+    font-size: 0.9rem;
+}
 
-    div[class*="_like"] button,
-    div[class*="_dislike"] button {
-        min-width: 2.4rem !important;
-    }
+/* ---- Loading animation ---- */
+.vyom-loader { display: flex; align-items: center; gap: 0.6rem; color: var(--vyom-dim); font-size: 0.9rem; padding: 0.3rem 0; }
+.vyom-dots { display: inline-flex; gap: 4px; }
+.vyom-dots span {
+    width: 7px; height: 7px; border-radius: 50%; background: currentColor;
+    animation: vyom-bounce 1.2s infinite ease-in-out;
+}
+.vyom-dots span:nth-child(2) { animation-delay: 0.15s; }
+.vyom-dots span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes vyom-bounce {
+    0%, 80%, 100% { opacity: 0.3; transform: translateY(0); }
+    40% { opacity: 1; transform: translateY(-4px); }
+}
+@media (prefers-reduced-motion: reduce) { .vyom-dots span { animation: none; opacity: 0.7; } }
 
-    /* off: dim outline icon */
-    div[class*="_like"] button[data-testid="stBaseButton-tertiary"] span[data-testid="stIconMaterial"],
-    div[class*="_dislike"] button[data-testid="stBaseButton-tertiary"] span[data-testid="stIconMaterial"] {
-        color: rgba(255, 255, 255, 0.55);
-        font-variation-settings: "FILL" 0;
-    }
+/* ---- Reply action row (icon-only like / dislike / regenerate) ---- */
+div[class*="_actions"] { flex-wrap: nowrap !important; gap: 0.15rem !important; }
+div[class*="_actions"] button,
+div[class*="_regen"] button {
+    min-width: 2.4rem !important;
+    white-space: nowrap !important;
+    padding-inline: 0.4rem !important;
+    font-size: 0.85rem !important;
+    background: transparent !important;
+    border-color: transparent !important;
+}
+div[class*="_like"] button[data-testid="stBaseButton-tertiary"] span[data-testid="stIconMaterial"],
+div[class*="_dislike"] button[data-testid="stBaseButton-tertiary"] span[data-testid="stIconMaterial"],
+div[class*="_regen"] button span[data-testid="stIconMaterial"] {
+    color: var(--vyom-dim);
+    font-variation-settings: "FILL" 0;
+}
+div[class*="_like"] button[data-testid="stBaseButton-primary"] span[data-testid="stIconMaterial"],
+div[class*="_dislike"] button[data-testid="stBaseButton-primary"] span[data-testid="stIconMaterial"] {
+    color: var(--vyom-strong);
+    font-variation-settings: "FILL" 1;
+}
 
-    /* on: solid white icon */
-    div[class*="_like"] button[data-testid="stBaseButton-primary"] span[data-testid="stIconMaterial"],
-    div[class*="_dislike"] button[data-testid="stBaseButton-primary"] span[data-testid="stIconMaterial"] {
-        color: #ffffff;
-        font-variation-settings: "FILL" 1;
-    }
+/* ---- Pause button: JS moves it exactly onto the send arrow ---- */
+.st-key-stop_generation { position: fixed; z-index: 1001; width: 32px; right: var(--stop-right); bottom: var(--stop-bottom); }
+.st-key-stop_generation button {
+    display: flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; min-height: 32px; padding: 0; border-radius: 50%;
+    color: var(--vyom-strong); background: var(--vyom-soft); border: 1px solid var(--vyom-border);
+}
 
-    /* ---- Chat messages ---- */
-    div[data-testid="stChatMessage"] [data-testid="stChatMessageAvatar"] {
-        display: none !important;
-    }
+/* ---- Search box: same column as the messages ---- */
+div[data-testid="stBottomBlockContainer"] { max-width: none !important; padding-inline: 1.25rem !important; }
+div[data-testid="stChatInput"] { width: 100% !important; max-width: none !important; margin: 0 !important; padding: 0 !important; }
 
-    div[data-testid="stChatMessage"] {
-        width: 100% !important;
-        padding-inline: 0 !important;
-    }
+.st-key-chat_input button {
+    width: 32px; height: 32px; min-height: 32px; padding: 0; border-radius: 50%;
+    border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+    color: currentColor;
+    background: color-mix(in srgb, currentColor 5%, transparent);
+    transition: background-color 160ms ease, border-color 160ms ease;
+}
+.st-key-chat_input button:hover:not(:disabled) {
+    border-color: color-mix(in srgb, currentColor 36%, transparent);
+    background: color-mix(in srgb, currentColor 13%, transparent);
+}
+div[data-testid="stChatInput"] > div {
+    border: 1px solid color-mix(in srgb, currentColor 22%, transparent) !important;
+    border-radius: 16px !important;
+    outline: none !important;
+    background: color-mix(in srgb, currentColor 3%, transparent) !important;
+    box-shadow: 0 6px 24px color-mix(in srgb, currentColor 7%, transparent),
+                inset 0 1px color-mix(in srgb, currentColor 8%, transparent) !important;
+    transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+div[data-testid="stChatInput"] textarea {
+    min-height: 40px !important; max-height: 4.5rem; font-size: 0.95rem; border-radius: 8px;
+    font-family: inherit; caret-color: currentColor !important; cursor: text;
+    border-color: transparent !important; outline: none !important; box-shadow: none !important;
+}
+div[data-testid="stChatInput"] textarea:focus { border-color: transparent !important; outline: none !important; box-shadow: none !important; }
+div[data-testid="stChatInput"] textarea::placeholder { color: currentColor !important; opacity: 0.58 !important; }
+div[data-testid="stChatInput"]:focus-within > div {
+    border-color: color-mix(in srgb, currentColor 50%, transparent) !important;
+    box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 10%, transparent),
+                0 8px 28px color-mix(in srgb, currentColor 10%, transparent) !important;
+}
 
-    div[data-testid="stChatMessage"] [data-testid="stChatMessageContent"] {
-        width: 100% !important;
-        max-width: none !important;
-        min-width: 0 !important;
-    }
+/* ---- Scroll-to-latest arrow ---- */
+#vyom-scroll-down {
+    position: fixed; left: 50%; bottom: 5.5rem; transform: translateX(-50%); z-index: 1000;
+    display: none; align-items: center; justify-content: center;
+    width: 36px; height: 36px; padding: 0; border-radius: 50%;
+    border: 1px solid var(--vyom-border); color: var(--vyom-strong); background: var(--vyom-pop);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35); cursor: pointer;
+}
+#vyom-scroll-down.show { display: flex; }
 
-    div[data-testid="stChatMessage"][aria-label*="user"] [data-testid="stChatMessageContent"] {
-        width: fit-content !important;
-        max-width: min(90%, 900px) !important;
-        margin-right: auto !important;
-        padding: 0.65rem 0.9rem;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 1.1rem 1.1rem 1.1rem 0.25rem;
-        background: rgba(255, 255, 255, 0.08);
-    }
+/* ---- Sidebar ---- */
+section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
+    justify-content: flex-start; text-align: left; min-height: 2rem;
+    padding: 0.35rem 0.6rem; border-color: transparent; border-radius: 0.55rem;
+}
+section[data-testid="stSidebar"] div[data-testid="stButton"] > button > div { justify-content: flex-start !important; }
+section[data-testid="stSidebar"] button[data-testid="stBaseButton-primary"] {
+    background: var(--vyom-soft); border-color: var(--vyom-border); color: var(--vyom-strong);
+}
+.st-key-new_chat_top button { border-radius: 10px; }
 
-    .greeting-text {
-        font-size: clamp(2rem, 5vw, 3.4rem);
-        font-weight: 600;
-        line-height: 1.2;
-    }
+/* ---- Desktop only: messages and search box share one centered column ---- */
+@media (min-width: 641px) {
+    [data-testid="stMainBlockContainer"],
+    section.main > div { max-width: 820px; }
+    div[data-testid="stBottomBlockContainer"] { max-width: 820px !important; margin-inline: auto; }
+}
 
-    .jasmine-flower {
-        flex: 0 0 auto;
-        color: #ffffff;
-        font-size: clamp(3rem, 7vw, 5rem);
-        line-height: 1;
-        filter: drop-shadow(0 0 0.8rem rgba(255, 255, 255, 0.28));
-    }
+/* ---- Mobile ---- */
+@media (max-width: 640px) {
+    [data-testid="stMainBlockContainer"],
+    section.main > div { padding: 3.5rem 0.5rem 5rem; }
+    div[data-testid="stBottomBlockContainer"] { padding-inline: 0.5rem !important; }
+    :root { --stop-right: 1.2rem; --stop-bottom: 1.1rem; }
+}
+</style>
+"""
 
-    div[data-testid="stMarkdownContainer"] h1 {
-        font-size: 1.65rem;
-        font-weight: 700;
-    }
+LIGHT_CSS = """
+<style>
+:root {
+    --vyom-fg: #111827;
+    --vyom-strong: #000000;
+    --vyom-dim: rgba(0, 0, 0, 0.5);
+    --vyom-soft: rgba(0, 0, 0, 0.05);
+    --vyom-border: rgba(0, 0, 0, 0.14);
+    --vyom-pop: rgba(255, 255, 255, 0.96);
+}
+.stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"],
+[data-testid="stBottom"], [data-testid="stBottom"] > div { background: #ffffff !important; color: #111827 !important; }
+[data-testid="stSidebar"], [data-testid="stSidebar"] > div { background: #f3f4f6 !important; }
+.stApp p, .stApp li, .stApp label, .stApp h1, .stApp h2, .stApp h3, .stApp h4,
+.stApp td, .stApp th, .stApp [data-testid="stCaptionContainer"] { color: #111827 !important; }
+.jasmine-flower { filter: none; }
+</style>
+"""
 
-    div[data-testid="stMarkdownContainer"] h2 {
-        font-size: 1.35rem;
-        font-weight: 700;
-    }
-
-    div[data-testid="stMarkdownContainer"] h3 {
-        font-size: 1.12rem;
-        font-weight: 600;
-    }
-
-    div[data-testid="stCheckbox"] input {
-        accent-color: #ffffff;
-    }
-
-    div[data-testid="stCheckbox"] input:focus-visible {
-        outline: 2px solid #ffffff;
-        outline-offset: 2px;
-    }
-
-    /* ---- Pause button: sits exactly where the send arrow is ---- */
-    .st-key-stop_generation {
-        position: fixed;
-        z-index: 1001;
-        right: var(--stop-right);
-        bottom: var(--stop-bottom);
-    }
-
-    .st-key-stop_generation button {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 32px;
-        height: 32px;
-        min-height: 32px;
-        padding: 0;
-        border-radius: 50%;
-        color: #ffffff;
-        background: rgba(255, 255, 255, 0.14);
-        border: 1px solid rgba(255, 255, 255, 0.3);
-    }
-
-    /* ---- Search box: keeps its left start, stretches to the right border ---- */
-    div[data-testid="stBottomBlockContainer"] {
-        max-width: none !important;
-        padding-inline: 1.25rem !important;
-    }
-
-    div[data-testid="stChatInput"] {
-        width: calc(100% - max(0px, (100% - 520px) / 2)) !important;
-        max-width: none !important;
-        margin-left: max(0px, calc((100% - 520px) / 2)) !important;
-        margin-right: 0 !important;
-        padding: 0 !important;
-    }
-
-    .st-key-chat_input button {
-        width: 32px;
-        height: 32px;
-        min-height: 32px;
-        padding: 0;
-        border-radius: 50%;
-        border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
-        color: currentColor;
-        background: color-mix(in srgb, currentColor 5%, transparent);
-        transition: background-color 160ms ease, border-color 160ms ease;
-    }
-
-    .st-key-chat_input button:hover:not(:disabled) {
-        border-color: color-mix(in srgb, currentColor 36%, transparent);
-        background: color-mix(in srgb, currentColor 13%, transparent);
-    }
-
-    div[data-testid="stChatInput"] > div {
-        border: 1px solid color-mix(in srgb, currentColor 22%, transparent) !important;
-        border-radius: 16px !important;
-        outline: none !important;
-        background: color-mix(in srgb, currentColor 3%, transparent) !important;
-        box-shadow:
-            0 6px 24px color-mix(in srgb, currentColor 7%, transparent),
-            inset 0 1px color-mix(in srgb, currentColor 8%, transparent) !important;
-        transition: border-color 180ms ease, box-shadow 180ms ease;
-    }
-
-    div[data-testid="stChatInput"] textarea {
-        min-height: 40px !important;
-        max-height: 4.5rem;
-        font-size: 0.95rem;
-        border-radius: 8px;
-        font-family: inherit;
-        caret-color: currentColor !important;
-        cursor: text;
-        border-color: transparent !important;
-        outline: none !important;
-        box-shadow: none !important;
-    }
-
-    div[data-testid="stChatInput"] textarea:focus {
-        border-color: transparent !important;
-        outline: none !important;
-        box-shadow: none !important;
-    }
-
-    div[data-testid="stChatInput"] textarea::placeholder {
-        color: currentColor !important;
-        opacity: 0.58 !important;
-    }
-
-    div[data-testid="stChatInput"]:focus-within > div {
-        border-color: color-mix(in srgb, currentColor 50%, transparent) !important;
-        box-shadow:
-            0 0 0 3px color-mix(in srgb, currentColor 10%, transparent),
-            0 8px 28px color-mix(in srgb, currentColor 10%, transparent) !important;
-    }
-
-    /* ---- Scroll-to-latest arrow (above the search box, middle of screen) ---- */
-    #vyom-scroll-down {
-        position: fixed;
-        left: 50%;
-        bottom: 5.5rem;
-        transform: translateX(-50%);
-        z-index: 1000;
-        display: none;
-        align-items: center;
-        justify-content: center;
-        width: 36px;
-        height: 36px;
-        padding: 0;
-        border-radius: 50%;
-        border: 1px solid rgba(255, 255, 255, 0.28);
-        color: #ffffff;
-        background: rgba(30, 30, 34, 0.92);
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-        cursor: pointer;
-    }
-
-    #vyom-scroll-down.show {
-        display: flex;
-    }
-
-    /* ---- Sidebar ---- */
-    section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
-        justify-content: flex-start;
-        text-align: left;
-        min-height: 2rem;
-        padding: 0.35rem 0.6rem;
-        border-color: transparent;
-        border-radius: 0.55rem;
-    }
-
-    section[data-testid="stSidebar"] div[data-testid="stButton"] > button > div {
-        justify-content: flex-start !important;
-    }
-
-    .st-key-new_chat_top button {
-        min-width: 38px;
-        border-radius: 10px;
-        font-size: 1.2rem;
-    }
-
-    @media (max-width: 640px) {
-        section.main > div,
-        [data-testid="stMainBlockContainer"] {
-            padding: 3.5rem 0.5rem 5rem;
-        }
-
-        div[data-testid="stBottomBlockContainer"] {
-            padding-inline: 0.5rem !important;
-        }
-
-        /* Full width search box on phones */
-        div[data-testid="stChatInput"] {
-            width: 100% !important;
-            margin-left: 0 !important;
-        }
-
-        :root {
-            --stop-right: 1.2rem;
-            --stop-bottom: 1.1rem;
-        }
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+st.markdown(BASE_CSS, unsafe_allow_html=True)
+st.session_state.setdefault("light_mode", False)
+if st.session_state["light_mode"]:
+    st.markdown(LIGHT_CSS, unsafe_allow_html=True)
 
 if "greeting" not in st.session_state:
     st.session_state["greeting"] = _time_greeting()
 if "chat_placeholder" not in st.session_state:
     st.session_state["chat_placeholder"] = random.choice(CHAT_PLACEHOLDERS)
 st.session_state.setdefault("generation_active", False)
-st.session_state.setdefault("messages", [])
-messages = st.session_state["messages"]
+_init_chats()
+messages = _active_messages()
 
 with st.container(key="app_title"):
     st.title("VYOM")
 
 with st.sidebar:
-    st.subheader("Current chat")
-    if st.button("New chat", key="new_chat_top", icon=":material/edit:"):
-        _start_new_chat()
-        st.rerun()
-    user_turns = [m["content"] for m in messages if m.get("role") == "user"]
-    if user_turns:
-        for text in user_turns:
-            st.caption(text[:60] + ("…" if len(text) > 60 else ""))
-    else:
-        st.caption("No messages yet.")
+    st.subheader("Chats")
+    st.button("New chat", key="new_chat_top", icon=":material/edit:", on_click=_start_new_chat)
+    for chat in reversed(st.session_state["chats"]):
+        if not chat["messages"]:
+            continue
+        st.button(
+            chat["title"],
+            key=f"chat_btn_{chat['id']}",
+            type="primary" if chat["id"] == st.session_state["active_chat"] else "secondary",
+            width="stretch",
+            on_click=_switch_chat,
+            args=(chat["id"],),
+        )
+    st.divider()
+    st.toggle("Light mode", key="light_mode")
     _render_admin_panel()
 
 if messages:
     _render_conversation(messages)
 else:
-    with st.chat_message("assistant"):
+    with st.container(key="assistant_msg_greeting"):
         greeting_column, flower_column = st.columns([0.88, 0.12])
         with greeting_column:
             st.markdown(
@@ -927,14 +923,27 @@ else:
                 'aria-label="White jasmine flower">❀</div>',
                 unsafe_allow_html=True,
             )
+    with st.container(key="starter_chips"):
+        for row in range(0, len(SUGGESTIONS), 2):
+            columns = st.columns(2, gap="small")
+            for column, suggestion in zip(columns, SUGGESTIONS[row : row + 2]):
+                with column:
+                    st.button(
+                        suggestion,
+                        key=f"chip_{suggestion}",
+                        width="stretch",
+                        on_click=_use_suggestion,
+                        args=(suggestion,),
+                    )
 
-# Floating "scroll to latest message" arrow (created once per page load).
+# Floating helpers (created once per page load): scroll-to-latest arrow, and
+# placing the pause button exactly on top of the send arrow.
 st.html(
     """
     <script>
     (() => {
-        if (window.__vyomScrollInit) return;
-        window.__vyomScrollInit = true;
+        if (window.__vyomInit) return;
+        window.__vyomInit = true;
         const button = document.createElement("button");
         button.id = "vyom-scroll-down";
         button.type = "button";
@@ -954,32 +963,61 @@ st.html(
             const away = el.scrollHeight - el.scrollTop - el.clientHeight;
             button.classList.toggle("show", away > 300);
         };
+        const placeStop = () => {
+            const stop = document.querySelector(".st-key-stop_generation");
+            const send = document.querySelector('[data-testid="stChatInputSubmitButton"]');
+            if (!stop || !send) return;
+            const r = send.getBoundingClientRect();
+            if (!r.width) return;
+            stop.style.left = (r.left + r.width / 2 - 16) + "px";
+            stop.style.top = (r.top + r.height / 2 - 16) + "px";
+            stop.style.right = "auto";
+            stop.style.bottom = "auto";
+        };
         button.addEventListener("click", () => {
             const el = scroller();
             if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
         });
         document.addEventListener("scroll", update, true);
-        setInterval(update, 500);
+        setInterval(() => { update(); placeStop(); }, 150);
     })();
     </script>
     """,
     unsafe_allow_javascript=True,
 )
 
-if prompt := st.chat_input(
+prompt = st.chat_input(
     st.session_state["chat_placeholder"],
     key="chat_input",
+    accept_file="multiple",
+    file_type=FILE_TYPES,
     accept_audio=True,
     width="stretch",
-):
+)
+pending = st.session_state.pop("pending_submission", None)
+
+topic = ""
+files: list[tuple[str, bytes, str]] = []
+audio = None
+has_input = False
+if prompt:
+    has_input = True
     if isinstance(prompt, str):
         topic = prompt.strip()
-        audio = None
     else:
-        topic = prompt.text.strip()
-        audio = prompt.audio
+        topic = (getattr(prompt, "text", "") or "").strip()
+        audio = getattr(prompt, "audio", None)
+        files = [
+            (f.name, f.getvalue(), f.type or "application/octet-stream")
+            for f in (getattr(prompt, "files", None) or [])
+        ]
+elif pending:
+    has_input = True
+    topic = pending["topic"]
+    files = pending.get("files", [])
 
-    if not topic and audio is None:
+if has_input:
+    if not topic and audio is None and not files:
         st.warning("Write a message before sending.")
     else:
         if audio is not None:
@@ -992,20 +1030,25 @@ if prompt := st.chat_input(
             except (OpenAIError, RuntimeError, TimeoutError, ValueError) as error:
                 st.error("Voice transcription failed. Please try again or type your message.")
                 st.caption(str(error))
+        if files and not topic:
+            topic = "Please summarize the attached file(s)."
 
         if topic:
             conversation_history = _conversation_history(messages)
-            messages.append({"role": "user", "content": topic})
-            with st.chat_message("user"):
-                st.markdown(topic)
+            user_message = {"role": "user", "content": topic, "files": files}
+            messages.append(user_message)
+            chat = _active_chat()
+            if chat["title"] == "New chat":
+                chat["title"] = topic[:32] + ("…" if len(topic) > 32 else "")
+            with st.container(key=f"user_msg_{len(messages) - 1}"):
+                st.markdown(_user_text(topic, files))
 
             progress_steps = []
             assistant_message = {"role": "assistant", "progress": progress_steps}
             messages.append(assistant_message)
             st.session_state["generation_active"] = True
 
-            # While the bot is working: hide the send arrow and show the pause
-            # button in its place (desktop and mobile).
+            # While the bot works: hide the send arrow, show the pause button on it.
             st.markdown(
                 "<style>[data-testid='stChatInputSubmitButton']"
                 "{visibility:hidden !important;}</style>",
@@ -1018,7 +1061,7 @@ if prompt := st.chat_input(
                 on_click=_stop_generation,
             )
 
-            with st.chat_message("assistant"):
+            with st.container(key=f"assistant_msg_{len(messages) - 1}"):
                 with st.expander(
                     "Thinking",
                     expanded=False,
@@ -1026,36 +1069,58 @@ if prompt := st.chat_input(
                     type="compact",
                 ):
                     progress_line = st.empty()
+                loader = st.empty()
+                loader_state = {"active": True}
+                loader.markdown(_loader_html("Thinking..."), unsafe_allow_html=True)
 
                 def update_progress(stage: str) -> None:
                     progress_steps.append(stage)
                     progress_line.caption(stage)
+                    if loader_state["active"]:
+                        loader.markdown(_loader_html(stage), unsafe_allow_html=True)
 
                 result_container = {}
 
                 def tracked_stream():
-                    for chunk in run_research_stream(
-                        topic,
-                        result_container,
-                        progress_callback=update_progress,
-                        conversation_history=conversation_history,
-                    ):
+                    if files:
+                        stream = run_attachment_stream(
+                            topic,
+                            files,
+                            result_container,
+                            progress_callback=update_progress,
+                            conversation_history=conversation_history,
+                        )
+                    else:
+                        stream = run_research_stream(
+                            topic,
+                            result_container,
+                            progress_callback=update_progress,
+                            conversation_history=conversation_history,
+                        )
+                    for chunk in stream:
+                        if loader_state["active"]:
+                            loader_state["active"] = False
+                            loader.empty()
                         assistant_message["partial_report"] = (
                             assistant_message.get("partial_report", "") + chunk
                         )
                         yield chunk
+
                 try:
                     st.write_stream(tracked_stream())
                     result = result_container.get("result")
                     st.session_state["generation_active"] = False
                 except (OpenAIError, RuntimeError, TimeoutError, ValueError) as error:
                     st.session_state["generation_active"] = False
+                    loader.empty()
                     update_progress("The response could not be completed.")
                     assistant_message["error"] = (
                         "The request could not be completed. Check the error details below."
                     )
                     assistant_message["error_detail"] = str(error)
                 else:
+                    if context := result_container.get("attachment_context"):
+                        user_message["attachment_context"] = context
                     if not isinstance(result, dict):
                         update_progress("The service returned an unexpected response.")
                         assistant_message["error"] = (
