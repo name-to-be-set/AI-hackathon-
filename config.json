@@ -1,8 +1,17 @@
 {
-  "$schema": "https://www.getbifrost.ai/schema",
-  "encryption_key": "env.BIFROST_ENCRYPTION_KEY",
-  "providers": {
-    "groq": {"keys": [{"name": "groq-main", "value": "env.GROQ_API_KEY", "models": ["*"]}]},
-    "gemini": {"keys": [{"name": "gemini-main", "value": "env.GEMINI_API_KEY", "models": ["*"]}]}
+    "encryption_key": "env.BIFROST_ENCRYPTION_KEY",
+    "config_store": {
+      "enabled": true,
+      "type": "postgres",
+      "config": {"host": "env.PG_HOST", "port": "5432", "user": "env.PG_USER", "password": "env.PG_PASSWORD", "db_name": "env.PG_DATABASE", "ssl_mode": "require"}
+    },
+    "logs_store": {
+      "enabled": true,
+      "type": "postgres",
+      "config": {"host": "env.PG_HOST", "port": "5432", "user": "env.PG_USER", "password": "env.PG_PASSWORD", "db_name": "env.PG_DATABASE", "ssl_mode": "require"}
+    },
+    "providers": {
+      "groq": {"keys": [{"name": "groq-main", "value": "env.GROQ_API_KEY", "models": ["*"]}]},
+      "gemini": {"keys": [{"name": "gemini-main", "value": "env.GEMINI_API_KEY", "models": ["*"]}]}
+    }
   }
-}
