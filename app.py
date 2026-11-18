@@ -124,12 +124,6 @@ def _render_admin_panel() -> None:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-SUGGESTIONS = (
-    "Explain how AI agents work",
-    "What's the latest AI news today?",
-    "Help me write a polite email",
-    "Give me tips to study better",
-)
 FILE_TYPES = ["pdf", "png", "jpg", "jpeg", "webp", "txt", "md", "csv"]
 
 
@@ -170,10 +164,6 @@ def _switch_chat(chat_id: str) -> None:
     st.session_state["active_chat"] = chat_id
     st.session_state["generation_active"] = False
     st.session_state.pop("share_message", None)
-
-
-def _use_suggestion(text: str) -> None:
-    st.session_state["pending_submission"] = {"topic": text, "files": []}
 
 
 def _regenerate() -> None:
@@ -686,11 +676,11 @@ section.main > div {
 
 /* ---- App name next to the sidebar arrow ---- */
 header[data-testid="stHeader"] { background: transparent; }
-.st-key-app_title { position: fixed; top: 0.55rem; left: 3.6rem; z-index: 1000002; pointer-events: none; }
+.st-key-app_title { position: fixed; top: 0.4rem; left: 4.4rem; z-index: 1000002; pointer-events: none; }
 .st-key-app_title div[data-testid="stMarkdownContainer"] h1 {
     margin: 0; padding: 0;
     font-family: "Cormorant Garamond", Georgia, serif;
-    font-size: 1.6rem; font-style: italic; font-weight: 600;
+    font-size: 2.1rem; font-style: italic; font-weight: 700;
     letter-spacing: 0.18em; line-height: 1; text-transform: uppercase; white-space: nowrap;
 }
 
@@ -702,12 +692,24 @@ div[class*="st-key-user_msg_"] [data-testid="stElementContainer"] {
     width: fit-content;
     max-width: 85%;
     margin-left: auto;
-    padding: 0.6rem 0.9rem;
+    padding: 0.65rem 0.95rem;
     border: 1px solid var(--vyom-border);
     border-radius: 1.1rem 1.1rem 0.25rem 1.1rem;
     background: var(--vyom-soft);
 }
-div[class*="st-key-user_msg_"] p { margin: 0; }
+div[class*="st-key-user_msg_"] [data-testid="stElementContainer"] {
+    display: flex;
+    align-items: center;
+}
+div[class*="st-key-user_msg_"] [data-testid="stMarkdown"],
+div[class*="st-key-user_msg_"] [data-testid="stMarkdownContainer"] {
+    margin: 0 !important;
+    padding: 0 !important;
+}
+div[class*="st-key-user_msg_"] [data-testid="stMarkdownContainer"] p {
+    margin: 0 !important;
+    line-height: 1.45;
+}
 
 div[class*="st-key-assistant_msg_"] { width: 100%; min-width: 0; margin-bottom: 0.8rem; }
 
@@ -721,17 +723,6 @@ div[class*="st-key-assistant_msg_"] { width: 100%; min-width: 0; margin-bottom: 
 div[data-testid="stMarkdownContainer"] h1 { font-size: 1.65rem; font-weight: 700; }
 div[data-testid="stMarkdownContainer"] h2 { font-size: 1.35rem; font-weight: 700; }
 div[data-testid="stMarkdownContainer"] h3 { font-size: 1.12rem; font-weight: 600; }
-
-/* ---- Starter chips ---- */
-.st-key-starter_chips button {
-    justify-content: flex-start;
-    text-align: left;
-    padding: 0.5rem 1rem;
-    border-radius: 999px;
-    border: 1px solid var(--vyom-border);
-    background: var(--vyom-soft);
-    font-size: 0.9rem;
-}
 
 /* ---- Loading animation ---- */
 .vyom-loader { display: flex; align-items: center; gap: 0.6rem; color: var(--vyom-dim); font-size: 0.9rem; padding: 0.3rem 0; }
@@ -923,18 +914,6 @@ else:
                 'aria-label="White jasmine flower">❀</div>',
                 unsafe_allow_html=True,
             )
-    with st.container(key="starter_chips"):
-        for row in range(0, len(SUGGESTIONS), 2):
-            columns = st.columns(2, gap="small")
-            for column, suggestion in zip(columns, SUGGESTIONS[row : row + 2]):
-                with column:
-                    st.button(
-                        suggestion,
-                        key=f"chip_{suggestion}",
-                        width="stretch",
-                        on_click=_use_suggestion,
-                        args=(suggestion,),
-                    )
 
 # Floating helpers (created once per page load): scroll-to-latest arrow, and
 # placing the pause button exactly on top of the send arrow.
