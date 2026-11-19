@@ -2,6 +2,7 @@ import base64
 import hmac
 import html
 import json
+import mimetypes
 import os
 import random
 import re
@@ -9,6 +10,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from io import BytesIO
+from pathlib import Path
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
@@ -51,6 +53,8 @@ def _load_streamlit_secrets_into_environment():
 
 _load_streamlit_secrets_into_environment()
 
+APP_DIR = Path(__file__).resolve().parent
+
 DEFAULT_APP_URL = "https://ai-research-assistant-sw7p.onrender.com"
 
 CHAT_PLACEHOLDERS = (
@@ -85,16 +89,15 @@ TIME_GREETING_LINES = {
 
 FILE_TYPES = ["pdf", "png", "jpg", "jpeg", "webp", "txt", "md", "csv"]
 
+THEME_OPTIONS = ("System", "Light", "Dark")
+
 
 # ---------------------------------------------------------------------------
-# Theme (Renderer-driven)
+# Theme
 # ---------------------------------------------------------------------------
 
-def _resolve_renderer_theme() -> str:
-    """Resolve theme from query params, session state, or system."""
-    if "user_theme_override" in st.session_state:
-        return st.session_state["user_theme_override"]
-
+def _initial_theme() -> str:
+    """Starting theme from the URL (?theme=light|dark), otherwise System."""
     raw = (
         st.query_params.get("theme")
         or st.query_params.get("renderer_theme")
@@ -108,56 +111,117 @@ def _resolve_renderer_theme() -> str:
     return "System"
 
 
+def _resolve_renderer_theme() -> str:
+    """The user's explicit choice always wins."""
+    value = st.session_state.get("user_theme_override")
+    return value if value in THEME_OPTIONS else _initial_theme()
+
+
+_THEME_SCRIPT = """
+<script>
+(() => {
+    // The newest mode always wins: store it on window so listeners
+    // registered earlier never use a stale value.
+    window.__vyomMode = __MODE__;
+
+    const resolve = () => {
+        const mode = window.__vyomMode || "System";
+        if (mode === "Light") return "light";
+        if (mode === "Dark") return "dark";
+
+        const external = String(
+            window.__VYOM_RENDERER_THEME__ ||
+            document.documentElement.dataset.rendererTheme ||
+            ""
+        ).trim().toLowerCase();
+        if (external === "light" || external === "dark") return external;
+
+        return window.matchMedia("(prefers-color-scheme: light)").matches
+            ? "light"
+            : "dark";
+    };
+
+    const sync = () => {
+        document.documentElement.dataset.vyomTheme = resolve();
+    };
+
+    window.__vyomSyncTheme = sync;
+    sync();
+
+    if (!window.__vyomThemeBound) {
+        window.__vyomThemeBound = true;
+        const mq = window.matchMedia("(prefers-color-scheme: light)");
+        mq.addEventListener?.("change", () => window.__vyomSyncTheme());
+        window.addEventListener("message", (event) => {
+            const data = event?.data;
+            if (!data || typeof data !== "object") return;
+            const candidate = String(data.theme || data.rendererTheme || "").toLowerCase();
+            if (candidate === "light" || candidate === "dark" || candidate === "system") {
+                window.__VYOM_RENDERER_THEME__ = candidate;
+                window.__vyomSyncTheme();
+            }
+        });
+    }
+})();
+</script>
+"""
+
+
 def _apply_renderer_theme_script(renderer_mode: str) -> str:
-    """Apply only the renderer's theme to the document without conflicting local overrides."""
-    mode_json = json.dumps(renderer_mode)
-    return f"""
-    <script>
-    (() => {{
-        const rendererMode = {mode_json};
+    return _THEME_SCRIPT.replace("__MODE__", json.dumps(renderer_mode))
 
-        const resolve = (mode) => {{
-            const external =
-                window.__VYOM_RENDERER_THEME__ ||
-                document.documentElement.dataset.rendererTheme ||
-                "";
-            const extNorm = String(external).trim().toLowerCase();
-            if (extNorm === "light" || extNorm === "dark") {{
-                return extNorm;
-            }}
 
-            const effective = (extNorm === "system") ? "System" : mode;
-            if (effective === "Light") return "light";
-            if (effective === "Dark") return "dark";
+@st.cache_resource(show_spinner=False)
+def _background_data_uri(theme: str):
+    """Find <theme>_bg.(jpg|png|webp) and embed it as a small data URI.
 
-            return window.matchMedia("(prefers-color-scheme: light)").matches
-                ? "light"
-                : "dark";
-        }};
-
-        const sync = () => {{
-            document.documentElement.dataset.vyomTheme = resolve(rendererMode);
-        }};
-
-        sync();
-
-        if (!window.__vyomRendererThemeBound) {{
-            window.__vyomRendererThemeBound = true;
-            const mq = window.matchMedia("(prefers-color-scheme: light)");
-            mq.addEventListener?.("change", sync);
-            window.addEventListener("message", (event) => {{
-                const data = event?.data;
-                if (!data || typeof data !== "object") return;
-                const candidate = String(data.theme || data.rendererTheme || "").toLowerCase();
-                if (candidate === "light" || candidate === "dark" || candidate === "system") {{
-                    window.__VYOM_RENDERER_THEME__ = candidate;
-                    sync();
-                }}
-            }});
-        }}
-    }})();
-    </script>
+    Looks in static/, assets/, images/ and next to app.py.
     """
+    for folder in ("static", "assets", "images", ""):
+        for ext in (".jpg", ".jpeg", ".png", ".webp"):
+            path = APP_DIR / folder / f"{theme}_bg{ext}"
+            if not path.is_file():
+                continue
+
+            try:
+                from PIL import Image
+
+                with Image.open(path) as image:
+                    image = image.convert("RGB")
+                    image.thumbnail((1920, 1920))
+                    buffer = BytesIO()
+                    image.save(buffer, format="JPEG", quality=80, optimize=True)
+                data, mime = buffer.getvalue(), "image/jpeg"
+            except Exception:
+                data = path.read_bytes()
+                mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
+
+            return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+
+    return None
+
+
+def _background_css() -> str:
+    rules = []
+
+    for theme, rgb in (("dark", "8, 10, 19"), ("light", "243, 246, 251")):
+        uri = _background_data_uri(theme)
+        if not uri:
+            continue
+
+        layer = (
+            f"linear-gradient(rgba({rgb}, .45), rgba({rgb}, .45)), "
+            f'url("{uri}")'
+        )
+        rules.append(
+            f'html[data-vyom-theme="{theme}"] .stApp {{ background-image: {layer} !important; }}'
+        )
+        if theme == "dark":
+            rules.append(
+                f"html:not([data-vyom-theme]) .stApp {{ background-image: {layer} !important; }}"
+            )
+
+    return "<style>" + "\n".join(rules) + "</style>" if rules else ""
 
 
 # ---------------------------------------------------------------------------
@@ -316,6 +380,14 @@ def _visible_report(report):
     return re.sub(r"\s*\[\d+(?:\s*,\s*\d+)*\]", "", report)
 
 
+def _html_inline(body):
+    """Render HTML sized to its content (so it doesn't stretch a row)."""
+    try:
+        st.html(body, width="content")
+    except TypeError:
+        st.html(body)
+
+
 # ---------------------------------------------------------------------------
 # PDF generation
 # ---------------------------------------------------------------------------
@@ -328,6 +400,7 @@ def _format_inline_pdf(text: str) -> str:
     return escaped
 
 
+@st.cache_data(show_spinner=False, max_entries=64)
 def _build_pdf(report, sources):
     buffer = BytesIO()
     document = SimpleDocTemplate(
@@ -477,95 +550,43 @@ def _render_images(images):
 
 
 # ---------------------------------------------------------------------------
-# Copy and sharing
+# Copy and sharing (static markup; behaviour is wired by the global script)
 # ---------------------------------------------------------------------------
 
-def _copy_icon_html(key_prefix, report):
+_COPY_SVG = (
+    '<svg class="vyom-copy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<rect x="9" y="9" width="13" height="13" rx="2"></rect>'
+    '<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>'
+)
+
+_DONE_SVG = (
+    '<svg class="vyom-done" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    'stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">'
+    '<path d="M20 6L9 17l-5-5"></path></svg>'
+)
+
+
+def _copy_icon_html(report):
     encoded = base64.b64encode(report.encode("utf-8")).decode("ascii")
 
-    return f"""
-    <button id="copy-reply-{key_prefix}" type="button"
-        aria-label="Copy reply" title="Copy"
-        style="display:flex;align-items:center;justify-content:center;
-        width:30px;height:30px;background:transparent;
-        border:1px solid transparent;color:var(--vyom-dim);
-        border-radius:50%;cursor:pointer;padding:0;min-width:30px;">
-    </button>
-    <script>
-    (() => {{
-        const button = document.getElementById("copy-reply-{key_prefix}");
-        if (!button) return;
-
-        const COPY = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
-        const DONE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
-
-        button.innerHTML = COPY;
-
-        const text = new TextDecoder().decode(
-            Uint8Array.from(atob("{encoded}"), c => c.charCodeAt(0))
-        );
-
-        let timer;
-
-        const done = () => {{
-            button.innerHTML = DONE;
-            button.style.color = "var(--vyom-strong)";
-            button.setAttribute("aria-label", "Copied");
-            clearTimeout(timer);
-            timer = setTimeout(() => {{
-                button.innerHTML = COPY;
-                button.style.color = "var(--vyom-dim)";
-                button.setAttribute("aria-label", "Copy reply");
-            }}, 1000);
-        }};
-
-        button.addEventListener("click", async () => {{
-            try {{
-                await navigator.clipboard.writeText(text);
-                done();
-            }} catch {{
-                const input = document.createElement("textarea");
-                input.value = text;
-                document.body.appendChild(input);
-                input.select();
-                const ok = document.execCommand("copy");
-                input.remove();
-                if (ok) done();
-            }}
-        }});
-    }})();
-    </script>
-    """
+    return (
+        '<button type="button" class="vyom-copy" aria-label="Copy reply" '
+        f'title="Copy" data-text="{encoded}">{_COPY_SVG}{_DONE_SVG}</button>'
+    )
 
 
-def _native_share_html(key_prefix, report):
+def _native_share_html(report):
     encoded = base64.b64encode(report.encode("utf-8")).decode("ascii")
 
-    return f"""
-    <button id="native-share-{key_prefix}" type="button"
-        style="display:none;width:100%;padding:0.5rem 0.8rem;
-        border-radius:0.5rem;border:1px solid var(--vyom-border);
-        background:transparent;color:inherit;font:inherit;
-        cursor:pointer;text-align:left;">
-        Share with your phone apps…
-    </button>
-    <script>
-    (() => {{
-        const button = document.getElementById("native-share-{key_prefix}");
-        if (!button || !navigator.share) return;
-
-        button.style.display = "block";
-
-        const text = new TextDecoder().decode(
-            Uint8Array.from(atob("{encoded}"), c => c.charCodeAt(0))
-        );
-
-        button.addEventListener("click", () => {{
-            navigator.share({{ title: "VYOM reply", text }}).catch(() => {{}});
-        }});
-    }})();
-    </script>
-    """
+    return (
+        '<button type="button" class="vyom-native-share" '
+        f'data-text="{encoded}" '
+        'style="display:none;width:100%;padding:0.5rem 0.8rem;'
+        "border-radius:0.5rem;border:1px solid var(--vyom-border);"
+        'background:transparent;color:inherit;font:inherit;cursor:pointer;text-align:left;">'
+        "Share with your phone apps…</button>"
+    )
 
 
 def _share_links(report):
@@ -643,7 +664,7 @@ def _render_reply_actions(message, key_prefix, question="", is_last=False):
                 on_click=_regenerate,
             )
 
-        st.html(_copy_icon_html(key_prefix, report), unsafe_allow_javascript=True)
+        _html_inline(_copy_icon_html(report))
 
         with st.popover(
             "\u200b",
@@ -652,7 +673,7 @@ def _render_reply_actions(message, key_prefix, question="", is_last=False):
             type="tertiary",
             key=f"{key_prefix}_sharepop",
         ):
-            st.html(_native_share_html(key_prefix, report), unsafe_allow_javascript=True)
+            st.html(_native_share_html(report))
 
             for label, url in _share_links(report):
                 st.link_button(label, url, width="stretch")
@@ -669,11 +690,12 @@ def _render_reply_actions(message, key_prefix, question="", is_last=False):
 
         if isinstance(result, dict):
             st.download_button(
-                "PDF",
+                "\u200b",
                 data=_build_pdf(report, valid_sources),
                 file_name="response.pdf",
                 mime="application/pdf",
                 key=f"{key_prefix}_pdf",
+                icon=":material/picture_as_pdf:",
                 help="Download this reply as a PDF",
                 type="tertiary",
             )
@@ -791,16 +813,6 @@ def _render_conversation(messages):
         is_last = index == len(messages) - 1
 
         with st.container(key=f"assistant_msg_{index}"):
-            if progress := message.get("progress"):
-                with st.expander(
-                    "Thinking",
-                    expanded=False,
-                    key=f"thinking_{index}",
-                    type="compact",
-                ):
-                    for step in progress:
-                        st.caption(step)
-
             if error := message.get("error"):
                 st.error(error)
                 if detail := message.get("error_detail"):
@@ -838,13 +850,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
-# Active Stop Button during generation in header area
-if st.session_state.get("generation_active", False):
-    col_spacer, col_stop = st.columns([10, 1])
-    with col_stop:
-        if st.button("Stop", key="global_stop_btn", type="primary"):
-            _stop_generation()
-            st.rerun()
 
 BASE_CSS = """
 <style>
@@ -941,10 +946,8 @@ div[class*="st-key-user_msg_"] [data-testid="stElementContainer"] {
     padding:.65rem .95rem;
     border:1px solid var(--vyom-border);
     border-radius:1.1rem 1.1rem .25rem 1.1rem;
-    background:var(--vyom-soft)!important;
     display:flex;
     align-items:center;
-    color:var(--vyom-fg);
 }
 
 div[class*="st-key-user_msg_"] [data-testid="stMarkdown"],
@@ -1061,59 +1064,7 @@ div[class*="st-key-assistant_msg_"] {
     .vyom-dots span {animation:none;opacity:.7;}
 }
 
-div[class*="_actions"] {
-    flex-wrap:wrap!important;
-    gap:.2rem!important;
-    align-items:center;
-}
-
-div[class*="_actions"] button,
-div[class*="_regen"] button {
-    width:30px!important;
-    height:30px!important;
-    min-width:30px!important;
-    max-width:30px!important;
-    padding:0!important;
-    border-radius:50%!important;
-    background:transparent!important;
-    border:1px solid transparent!important;
-    box-shadow:none!important;
-}
-
-div[class*="_actions"] button span[data-testid="stIconMaterial"],
-div[class*="_regen"] button span[data-testid="stIconMaterial"] {
-    color:var(--vyom-dim)!important;
-    font-size:16px!important;
-}
-
-div[class*="_actions"] button:hover,
-div[class*="_regen"] button:hover {
-    background:var(--vyom-soft)!important;
-}
-
-div[class*="_actions"] button:hover span[data-testid="stIconMaterial"] {
-    color:var(--vyom-strong)!important;
-}
-
-div[class*="_like"] button[data-testid="stBaseButton-primary"],
-div[class*="_dislike"] button[data-testid="stBaseButton-primary"] {
-    width:30px!important;
-    height:30px!important;
-    min-width:30px!important;
-    max-width:30px!important;
-    padding:0!important;
-    border-radius:50%!important;
-    background:var(--vyom-strong)!important;
-    border:1px solid var(--vyom-strong)!important;
-    box-shadow:none!important;
-}
-
-div[class*="_like"] button[data-testid="stBaseButton-primary"] span[data-testid="stIconMaterial"],
-div[class*="_dislike"] button[data-testid="stBaseButton-primary"] span[data-testid="stIconMaterial"] {
-    color:var(--vyom-invert)!important;
-    font-size:16px!important;
-}
-
+/* The real Stop button stays in the DOM (the pause overlay clicks it) */
 .st-key-stop_generation {
     position:absolute!important;
     width:1px;
@@ -1134,9 +1085,6 @@ div[class*="_dislike"] button[data-testid="stBaseButton-primary"] span[data-test
     padding:0;
     border-radius:50%;
     cursor:pointer;
-    border:1px solid var(--vyom-border);
-    background:var(--vyom-strong);
-    color:var(--vyom-invert);
 }
 
 #vyom-pause.show {display:flex;}
@@ -1159,17 +1107,11 @@ div[data-testid="stChatInput"] {
     min-height:32px;
     padding:0;
     border-radius:50%;
-    border:1px solid color-mix(in srgb,currentColor 18%,transparent);
-    color:currentColor;
-    background:color-mix(in srgb,currentColor 5%,transparent);
 }
 
 div[data-testid="stChatInput"]>div {
-    border:1px solid var(--vyom-border)!important;
     border-radius:16px!important;
     outline:none!important;
-    background:var(--vyom-panel)!important;
-    box-shadow:0 6px 24px color-mix(in srgb,currentColor 7%,transparent)!important;
 }
 
 div[data-testid="stChatInput"] textarea {
@@ -1184,27 +1126,19 @@ div[data-testid="stChatInput"] textarea {
     box-shadow:none!important;
 }
 
-div[data-testid="stChatInput"] textarea::placeholder {
-    color:var(--vyom-dim)!important;
-    opacity:1!important;
-}
-
 #vyom-scroll-down {
     position:fixed;
     left:50%;
-    bottom:5.5rem;
+    bottom:6rem;
     transform:translateX(-50%);
     z-index:1000;
     display:none;
     align-items:center;
     justify-content:center;
-    width:34px;
-    height:34px;
+    width:36px;
+    height:36px;
     padding:0;
     border-radius:50%;
-    border:1px solid var(--vyom-border);
-    color:var(--vyom-strong);
-    background:var(--vyom-pop);
     box-shadow:0 4px 16px rgba(0,0,0,.35);
     cursor:pointer;
 }
@@ -1216,7 +1150,6 @@ section[data-testid="stSidebar"] div[data-testid="stButton"]>button {
     text-align:left;
     min-height:2rem;
     padding:.35rem .6rem;
-    border-color:transparent;
     border-radius:.55rem;
 }
 
@@ -1253,16 +1186,24 @@ section[data-testid="stSidebar"] div[data-testid="stButton"]>button>div {
 
 st.markdown(BASE_CSS, unsafe_allow_html=True)
 
+if "user_theme_override" not in st.session_state:
+    st.session_state["user_theme_override"] = _initial_theme()
+
 _renderer_theme = _resolve_renderer_theme()
 st.session_state["theme_mode"] = _renderer_theme
 
-_THEME_CSS_PATH = os.path.join(os.path.dirname(__file__), "vyom_theme.css")
+_THEME_CSS_PATH = APP_DIR / "vyom_theme.css"
 
 try:
-    with open(_THEME_CSS_PATH, "r", encoding="utf-8") as theme_file:
-        st.markdown(f"<style>{theme_file.read()}</style>", unsafe_allow_html=True)
+    st.markdown(
+        f"<style>{_THEME_CSS_PATH.read_text(encoding='utf-8')}</style>",
+        unsafe_allow_html=True,
+    )
 except OSError:
     st.warning("VYOM theme stylesheet was not found; using the default styling.")
+
+if _bg_css := _background_css():
+    st.markdown(_bg_css, unsafe_allow_html=True)
 
 st.html(
     _apply_renderer_theme_script(_renderer_theme),
@@ -1316,7 +1257,22 @@ with st.sidebar:
 
     st.divider()
 
-    st.caption(f"Renderer theme: {_renderer_theme}")
+    st.radio(
+        "Theme",
+        THEME_OPTIONS,
+        key="user_theme_override",
+        horizontal=True,
+    )
+
+    missing_backgrounds = [
+        name for name in ("dark", "light") if not _background_data_uri(name)
+    ]
+    if missing_backgrounds:
+        st.caption(
+            "Background image not found: "
+            + ", ".join(f"{name}_bg.jpg" for name in missing_backgrounds)
+            + " (put it in the static/ folder next to app.py)."
+        )
 
     _render_admin_panel()
 
@@ -1344,36 +1300,28 @@ else:
             )
 
 # ---------------------------------------------------------------------------
-# Floating scroll and stop controls
+# Global script: scroll-down button, pause button, copy + native share
 # ---------------------------------------------------------------------------
 
 st.html(
     """
     <script>
     (() => {
-        if (window.__vyomInit) return;
-        window.__vyomInit = true;
+        const SCROLL_ID = "vyom-scroll-down";
+        const PAUSE_ID = "vyom-pause";
 
-        const down = document.createElement("button");
-        down.id = "vyom-scroll-down";
-        down.type = "button";
-        down.setAttribute("aria-label", "Scroll to latest message");
-        down.innerHTML =
-            '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
-        document.body.appendChild(down);
-
-        const pause = document.createElement("button");
-        pause.id = "vyom-pause";
-        pause.type = "button";
-        pause.setAttribute("aria-label", "Stop response");
-        pause.innerHTML =
-            '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16" rx="1.2"/><rect x="14" y="4" width="5" height="16" rx="1.2"/></svg>';
-        document.body.appendChild(pause);
-
-        const scroller = () =>
-            document.querySelector('[data-testid="stMain"]') ||
-            document.querySelector("section.main") ||
-            document.scrollingElement;
+        // ---- find the element that actually scrolls the conversation ----
+        const scroller = () => {
+            let el = document.querySelector('[data-testid="stMainBlockContainer"]');
+            while (el && el !== document.body) {
+                const oy = getComputedStyle(el).overflowY;
+                if ((oy === "auto" || oy === "scroll") && el.scrollHeight > el.clientHeight + 1) {
+                    return el;
+                }
+                el = el.parentElement;
+            }
+            return document.scrollingElement || document.documentElement;
+        };
 
         const findSend = () => {
             const box = document.querySelector('[data-testid="stChatInput"]');
@@ -1383,84 +1331,170 @@ st.html(
             if (direct) return direct;
 
             const skip = /attach|upload|file|add|mic|record|audio|voice/i;
-
             const buttons = [...box.querySelectorAll("button")].filter(button =>
                 !skip.test(
                     (button.getAttribute("aria-label") || "") + " " +
                     (button.getAttribute("title") || "")
                 )
             );
-
             return buttons[buttons.length - 1] || null;
         };
 
         let hiddenSend = null;
 
-        const syncPause = () => {
+        const ensureButtons = () => {
+            let down = document.getElementById(SCROLL_ID);
+            if (!down) {
+                down = document.createElement("button");
+                down.id = SCROLL_ID;
+                down.type = "button";
+                down.setAttribute("aria-label", "Scroll to latest message");
+                down.innerHTML =
+                    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
+                down.addEventListener("click", () => {
+                    const el = scroller();
+                    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+                });
+                document.body.appendChild(down);
+            }
+
+            let pause = document.getElementById(PAUSE_ID);
+            if (!pause) {
+                pause = document.createElement("button");
+                pause.id = PAUSE_ID;
+                pause.type = "button";
+                pause.setAttribute("aria-label", "Stop response");
+                pause.innerHTML =
+                    '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16" rx="1.2"/><rect x="14" y="4" width="5" height="16" rx="1.2"/></svg>';
+                pause.addEventListener("click", () => {
+                    const source = document.querySelector(".st-key-stop_generation button");
+                    if (source) source.click();
+                });
+                document.body.appendChild(pause);
+            }
+            return { down, pause };
+        };
+
+        const tick = () => {
+            const { down, pause } = ensureButtons();
+
+            // scroll-down button
+            const el = scroller();
+            const away = el.scrollHeight - el.scrollTop - el.clientHeight;
+            down.classList.toggle("show", away > 200);
+
+            // pause button sits on top of the send button while generating
             const source = document.querySelector(".st-key-stop_generation button");
             const send = findSend();
+            const box = document.querySelector('[data-testid="stChatInput"]');
 
-            if (source && send) {
-                const rect = send.getBoundingClientRect();
+            if (source && (send || box)) {
+                let cx, cy;
+                const rect = send ? send.getBoundingClientRect() : null;
 
-                if (rect.width) {
-                    pause.style.left = (rect.left + rect.width / 2 - 16) + "px";
-                    pause.style.top = (rect.top + rect.height / 2 - 16) + "px";
-                    pause.classList.add("show");
+                if (rect && rect.width) {
+                    cx = rect.left + rect.width / 2;
+                    cy = rect.top + rect.height / 2;
                     send.style.visibility = "hidden";
                     hiddenSend = send;
-                    return;
+                } else {
+                    const b = box.getBoundingClientRect();
+                    cx = b.right - 28;
+                    cy = b.top + b.height / 2;
+                }
+
+                pause.style.left = (cx - 16) + "px";
+                pause.style.top = (cy - 16) + "px";
+                pause.classList.add("show");
+            } else {
+                pause.classList.remove("show");
+                if (hiddenSend) {
+                    hiddenSend.style.visibility = "";
+                    hiddenSend = null;
                 }
             }
 
-            pause.classList.remove("show");
-
-            if (hiddenSend) {
-                hiddenSend.style.visibility = "";
-                hiddenSend = null;
-            }
-        };
-
-        const syncDown = () => {
-            const element = scroller();
-            if (!element) return;
-
-            const away = element.scrollHeight - element.scrollTop - element.clientHeight;
-            down.classList.toggle("show", away > 300);
-        };
-
-        pause.addEventListener("click", () => {
-            const source = document.querySelector(".st-key-stop_generation button");
-            if (source) source.click();
-        });
-
-        down.addEventListener("click", () => {
-            const element = scroller();
-            if (element) {
-                element.scrollTo({
-                    top: element.scrollHeight,
-                    behavior: "smooth"
+            // reveal the native "share with phone apps" button where supported
+            if (navigator.share) {
+                document.querySelectorAll(".vyom-native-share").forEach(b => {
+                    b.style.display = "block";
                 });
             }
-        });
+        };
 
-        document.addEventListener("scroll", syncDown, true);
-        window.addEventListener("resize", syncPause);
+        const decode = (b64) => {
+            try {
+                return new TextDecoder().decode(
+                    Uint8Array.from(atob(b64), c => c.charCodeAt(0))
+                );
+            } catch (e) {
+                return "";
+            }
+        };
 
-        const observer = new MutationObserver(() => {
-            syncDown();
-            syncPause();
-        });
+        // ---- one delegated click handler for copy + native share ----
+        if (!window.__vyomClickBound) {
+            window.__vyomClickBound = true;
 
-        observer.observe(document.body, {
-            childList: true,
-            subtree: true
-        });
+            document.addEventListener("click", async (event) => {
+                const target = event.target;
+                if (!target || !target.closest) return;
 
-        setInterval(() => {
-            syncDown();
-            syncPause();
-        }, 350);
+                const copyBtn = target.closest(".vyom-copy");
+                if (copyBtn) {
+                    const text = decode(copyBtn.getAttribute("data-text") || "");
+                    if (!text) return;
+
+                    let ok = false;
+                    try {
+                        await navigator.clipboard.writeText(text);
+                        ok = true;
+                    } catch (e) {
+                        const input = document.createElement("textarea");
+                        input.value = text;
+                        input.style.position = "fixed";
+                        input.style.opacity = "0";
+                        document.body.appendChild(input);
+                        input.select();
+                        try { ok = document.execCommand("copy"); } catch (e2) {}
+                        input.remove();
+                    }
+
+                    if (ok) {
+                        copyBtn.classList.add("copied");
+                        copyBtn.setAttribute("aria-label", "Copied");
+                        clearTimeout(copyBtn.__vyomTimer);
+                        copyBtn.__vyomTimer = setTimeout(() => {
+                            copyBtn.classList.remove("copied");
+                            copyBtn.setAttribute("aria-label", "Copy reply");
+                        }, 1200);
+                    }
+                    return;
+                }
+
+                const shareBtn = target.closest(".vyom-native-share");
+                if (shareBtn && navigator.share) {
+                    const text = decode(shareBtn.getAttribute("data-text") || "");
+                    navigator.share({ title: "VYOM reply", text }).catch(() => {});
+                }
+            });
+        }
+
+        // ---- run now, and keep running (Streamlit re-renders constantly) ----
+        clearInterval(window.__vyomTimer);
+        window.__vyomObserver && window.__vyomObserver.disconnect();
+
+        if (!window.__vyomScrollBound) {
+            window.__vyomScrollBound = true;
+            document.addEventListener("scroll", () => window.__vyomTick && window.__vyomTick(), true);
+            window.addEventListener("resize", () => window.__vyomTick && window.__vyomTick());
+        }
+
+        window.__vyomTick = tick;
+        window.__vyomObserver = new MutationObserver(tick);
+        window.__vyomObserver.observe(document.body, { childList: true, subtree: true });
+        window.__vyomTimer = setInterval(tick, 300);
+        tick();
     })();
     </script>
     """,
@@ -1563,6 +1597,7 @@ if has_input:
         messages.append(assistant_message)
         st.session_state["generation_active"] = True
 
+        # Hidden real button; the floating pause overlay clicks this one.
         st.button(
             "Stop",
             key="stop_generation",
@@ -1571,14 +1606,7 @@ if has_input:
         )
 
         with st.container(key=f"assistant_msg_{len(messages) - 1}"):
-            with st.expander(
-                "Thinking",
-                expanded=False,
-                key=f"thinking_current_{len(messages)}",
-                type="compact",
-            ):
-                progress_line = st.empty()
-
+            # No "Thinking" panel: only a small loader line with the live stage.
             loader = st.empty()
             loader_state = {"active": True}
 
@@ -1589,7 +1617,11 @@ if has_input:
 
             def update_progress(stage):
                 progress_steps.append(stage)
-                progress_line.caption(stage)
+                if loader_state["active"]:
+                    loader.markdown(
+                        _loader_html(stage),
+                        unsafe_allow_html=True,
+                    )
 
             result_container = {}
 
@@ -1633,6 +1665,7 @@ if has_input:
                 ValueError,
             ) as error:
                 st.session_state["generation_active"] = False
+                loader_state["active"] = False
                 loader.empty()
                 update_progress("The response could not be completed.")
 
@@ -1643,6 +1676,9 @@ if has_input:
                 assistant_message["error_detail"] = str(error)
 
             else:
+                loader_state["active"] = False
+                loader.empty()
+
                 if context := result_container.get("attachment_context"):
                     user_message["attachment_context"] = context
 

@@ -1,18 +1,39 @@
 /* ============================================================
-   VYOM — Complete Theme Layer
+   VYOM — Complete Theme Layer (dark + light)
+   Background images are injected by app.py (embedded), not here.
    ============================================================ */
 
 :root {
     color-scheme: dark;
     --vyom-bg: #080a13;
     --vyom-panel: rgba(17, 21, 36, 0.92);
-    --vyom-panel-hover: rgba(27, 33, 52, 0.95);
+    --vyom-pop: #141a2c;
     --vyom-fg: #edf1fa;
     --vyom-strong: #ffffff;
-    --vyom-dim: #aab5c9;
-    --vyom-border: rgba(160, 177, 205, 0.25);
-    --vyom-soft: rgba(130, 151, 190, 0.12);
-    --vyom-hl: rgba(100, 151, 220, 0.20);
+    --vyom-invert: #080a13;
+    --vyom-dim: #b9c4d9;
+    --vyom-border: rgba(160, 177, 205, 0.28);
+    --vyom-soft: rgba(130, 151, 190, 0.14);
+    --vyom-hl: rgba(100, 151, 220, 0.22);
+    --vyom-accent: #8c78e8;
+    --vyom-accent-2: #48b6ce;
+    --vyom-user-bg: #202a3e;
+    --vyom-user-border: rgba(132, 157, 199, 0.25);
+    --vyom-shadow: rgba(0, 0, 0, 0.35);
+}
+
+html[data-vyom-theme="dark"] {
+    color-scheme: dark;
+    --vyom-bg: #080a13;
+    --vyom-panel: rgba(17, 21, 36, 0.92);
+    --vyom-pop: #141a2c;
+    --vyom-fg: #edf1fa;
+    --vyom-strong: #ffffff;
+    --vyom-invert: #080a13;
+    --vyom-dim: #b9c4d9;
+    --vyom-border: rgba(160, 177, 205, 0.28);
+    --vyom-soft: rgba(130, 151, 190, 0.14);
+    --vyom-hl: rgba(100, 151, 220, 0.22);
     --vyom-accent: #8c78e8;
     --vyom-accent-2: #48b6ce;
     --vyom-user-bg: #202a3e;
@@ -24,40 +45,27 @@ html[data-vyom-theme="light"] {
     color-scheme: light;
     --vyom-bg: #f3f6fb;
     --vyom-panel: rgba(255, 255, 255, 0.94);
-    --vyom-panel-hover: rgba(246, 249, 255, 0.98);
+    --vyom-pop: #ffffff;
     --vyom-fg: #1c2b42;
     --vyom-strong: #101d32;
-    --vyom-dim: #5c6d83;
-    --vyom-border: rgba(65, 100, 143, 0.24);
-    --vyom-soft: rgba(220, 231, 245, 0.75);
-    --vyom-hl: rgba(67, 133, 202, 0.14);
+    --vyom-invert: #ffffff;
+    --vyom-dim: #566982;
+    --vyom-border: rgba(65, 100, 143, 0.30);
+    --vyom-soft: rgba(205, 220, 240, 0.70);
+    --vyom-hl: rgba(67, 133, 202, 0.18);
     --vyom-accent: #8263cf;
-    --vyom-accent-2: #258eae;
-    --vyom-user-bg: #e5edf8;
-    --vyom-user-border: rgba(75, 112, 157, 0.22);
-    --vyom-shadow: rgba(35, 61, 92, 0.06);
-}
-
-html[data-vyom-theme="dark"] {
-    color-scheme: dark;
-    --vyom-bg: #080a13;
-    --vyom-panel: rgba(17, 21, 36, 0.92);
-    --vyom-panel-hover: rgba(27, 33, 52, 0.95);
-    --vyom-fg: #edf1fa;
-    --vyom-strong: #ffffff;
-    --vyom-dim: #b9c4d9;
-    --vyom-border: rgba(160, 177, 205, 0.28);
-    --vyom-soft: rgba(130, 151, 190, 0.12);
-    --vyom-hl: rgba(100, 151, 220, 0.20);
-    --vyom-user-bg: #202a3e;
-    --vyom-user-border: rgba(132, 157, 199, 0.25);
+    --vyom-accent-2: #1f86a6;
+    --vyom-user-bg: #e1ebf8;
+    --vyom-user-border: rgba(75, 112, 157, 0.28);
+    --vyom-shadow: rgba(35, 61, 92, 0.10);
 }
 
 /* ============================================================
-   PAGE BACKGROUNDS
+   PAGE BACKGROUND (image comes from app.py) + MERGED CONTAINERS
    ============================================================ */
 
-html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
+html, body {
+    background-color: var(--vyom-bg) !important;
     color: var(--vyom-fg) !important;
 }
 
@@ -67,49 +75,213 @@ html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
     background-position: center center !important;
     background-repeat: no-repeat !important;
     background-attachment: fixed !important;
+    color: var(--vyom-fg) !important;
 }
 
-html[data-vyom-theme="dark"] .stApp {
-    background-image: linear-gradient(rgba(8, 10, 19, 0.5), rgba(8, 10, 19, 0.5)), url("./static/dark_bg.jpg") !important;
-}
-
-html[data-vyom-theme="light"] .stApp {
-    background-image: linear-gradient(rgba(243, 246, 251, 0.5), rgba(243, 246, 251, 0.5)), url("./static/light_bg.jpg") !important;
+/* every Streamlit layer must be transparent so the image shows through
+   and the bottom chat-input area merges with the page */
+[data-testid="stAppViewContainer"],
+[data-testid="stMain"],
+[data-testid="stMainBlockContainer"],
+[data-testid="stHeader"],
+[data-testid="stBottom"],
+[data-testid="stBottom"] > div,
+[data-testid="stBottomBlockContainer"],
+[data-testid="stBottomBlockContainer"] > [data-testid="stVerticalBlock"],
+[data-testid="stBottomBlockContainer"] > [data-testid="stVerticalBlock"] > [data-testid="stElementContainer"],
+[data-testid="stChatInput"] {
+    background: transparent !important;
+    background-color: transparent !important;
+    background-image: none !important;
+    box-shadow: none !important;
 }
 
 /* ============================================================
-   HIDE THINKING AREA WHEN WORKING
+   TEXT COLOURS (so the light theme is readable)
    ============================================================ */
 
-html[data-vyom-theme] [data-testid="stExpander"] {
-    display: none !important;
+.stApp p,
+.stApp li,
+.stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6,
+.stApp label,
+.stApp td, .stApp th,
+.stApp [data-testid="stMarkdownContainer"],
+.stApp [data-testid="stWidgetLabel"] p,
+.stApp [data-testid="stRadio"] label p {
+    color: var(--vyom-fg) !important;
+}
+
+.stApp [data-testid="stCaptionContainer"],
+.stApp [data-testid="stCaptionContainer"] p {
+    color: var(--vyom-dim) !important;
+}
+
+.stApp [data-testid="stMarkdownContainer"] a {
+    color: var(--vyom-accent-2) !important;
+}
+
+.stApp [data-testid="stMarkdownContainer"] th,
+.stApp [data-testid="stMarkdownContainer"] td {
+    border-color: var(--vyom-border) !important;
+}
+
+.stApp pre,
+.stApp [data-testid="stCode"],
+.stApp [data-testid="stCodeBlock"] {
+    background: var(--vyom-soft) !important;
+    color: var(--vyom-fg) !important;
+    border: 1px solid var(--vyom-border) !important;
+}
+
+.stApp hr {
+    border-color: var(--vyom-border) !important;
+}
+
+/* top bar icons: sidebar arrow, three-dots menu */
+header[data-testid="stHeader"] button,
+header[data-testid="stHeader"] a,
+header[data-testid="stHeader"] span,
+[data-testid="stExpandSidebarButton"],
+[data-testid="stSidebarCollapseButton"] button,
+[data-testid="stSidebarCollapsedControl"] button {
+    color: var(--vyom-fg) !important;
+}
+
+header[data-testid="stHeader"] svg,
+[data-testid="stExpandSidebarButton"] svg {
+    fill: currentColor !important;
 }
 
 /* ============================================================
-   UNIFORM CIRCULAR ACTION BUTTONS (LIKE, DISLIKE, REGEN, COPY, SHARE)
+   SIDEBAR
    ============================================================ */
 
-html[data-vyom-theme] div[class*="_actions"] [data-testid="stButton"],
-html[data-vyom-theme] div[class*="_regen"] [data-testid="stButton"],
-html[data-vyom-theme] div[class*="_like"] [data-testid="stButton"],
-html[data-vyom-theme] div[class*="_dislike"] [data-testid="stButton"],
-html[data-vyom-theme] [data-testid="stPopover"] [data-testid="stButton"] {
-    width: 32px !important;
-    height: 32px !important;
-    min-width: 32px !important;
-    max-width: 32px !important;
-    min-height: 32px !important;
-    max-height: 32px !important;
+section[data-testid="stSidebar"],
+section[data-testid="stSidebar"] > div,
+[data-testid="stSidebarContent"] {
+    background: var(--vyom-pop) !important;
+    color: var(--vyom-fg) !important;
+}
+
+section[data-testid="stSidebar"] {
+    border-right: 1px solid var(--vyom-border) !important;
+}
+
+section[data-testid="stSidebar"] button[data-testid="stBaseButton-secondary"],
+section[data-testid="stSidebar"] button[data-testid="stBaseButton-primary"] {
+    background: transparent !important;
+    color: var(--vyom-fg) !important;
+    border: 1px solid transparent !important;
+}
+
+section[data-testid="stSidebar"] button[data-testid="stBaseButton-secondary"]:hover {
+    background: var(--vyom-soft) !important;
+}
+
+section[data-testid="stSidebar"] button[data-testid="stBaseButton-primary"] {
+    background: var(--vyom-hl) !important;
+    border: 1px solid var(--vyom-accent-2) !important;
+}
+
+section[data-testid="stSidebar"] button p,
+section[data-testid="stSidebar"] button span {
+    color: var(--vyom-fg) !important;
+}
+
+/* ============================================================
+   POPOVERS, MENUS, EXPANDERS, LINK / DOWNLOAD BUTTONS
+   ============================================================ */
+
+[data-testid="stPopoverBody"],
+div[data-baseweb="popover"] > div,
+div[data-baseweb="popover"] ul,
+div[data-baseweb="popover"] li {
+    background: var(--vyom-pop) !important;
+    color: var(--vyom-fg) !important;
+}
+
+[data-testid="stPopoverBody"] {
+    border: 1px solid var(--vyom-border) !important;
+}
+
+div[data-baseweb="popover"] li *,
+div[data-baseweb="popover"] [role="menuitem"] * {
+    color: var(--vyom-fg) !important;
+}
+
+[data-testid="stPopoverBody"] a[data-testid="stBaseLinkButton-secondary"],
+[data-testid="stPopoverBody"] button[data-testid="stBaseButton-secondary"] {
+    background: var(--vyom-soft) !important;
+    color: var(--vyom-fg) !important;
+    border: 1px solid var(--vyom-border) !important;
+}
+
+[data-testid="stPopoverBody"] a p,
+[data-testid="stPopoverBody"] button p,
+[data-testid="stPopoverBody"] button span {
+    color: var(--vyom-fg) !important;
+}
+
+[data-testid="stExpander"] details {
+    background: var(--vyom-panel) !important;
+    border: 1px solid var(--vyom-border) !important;
+    border-radius: 12px !important;
+}
+
+[data-testid="stExpander"] summary,
+[data-testid="stExpander"] summary * {
+    color: var(--vyom-fg) !important;
+}
+
+.stApp a[data-testid="stBaseLinkButton-secondary"] {
+    background: var(--vyom-soft) !important;
+    color: var(--vyom-fg) !important;
+    border: 1px solid var(--vyom-border) !important;
+}
+
+.stApp a[data-testid="stBaseLinkButton-secondary"] p {
+    color: var(--vyom-fg) !important;
+}
+
+/* ============================================================
+   MESSAGES
+   ============================================================ */
+
+div[class*="st-key-user_msg_"] [data-testid="stElementContainer"] {
+    background: var(--vyom-user-bg) !important;
+    border: 1px solid var(--vyom-user-border) !important;
+    color: var(--vyom-fg) !important;
+}
+
+/* ============================================================
+   REPLY ACTION ROW — one clean left-aligned row of equal circles
+   ============================================================ */
+
+html[data-vyom-theme] div[class*="_actions"] {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    justify-content: flex-start !important;
+    align-items: center !important;
+    gap: 0.35rem !important;
+    width: 100% !important;
+}
+
+html[data-vyom-theme] div[class*="_actions"] > *,
+html[data-vyom-theme] div[class*="_actions"] [data-testid="stElementContainer"],
+html[data-vyom-theme] div[class*="_actions"] [data-testid="stHtml"] {
+    flex: 0 0 auto !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
     margin: 0 !important;
-    padding: 0 !important;
 }
 
+/* the circle itself (like, dislike, regen, pdf, copy) */
 html[data-vyom-theme] div[class*="_actions"] button,
 html[data-vyom-theme] div[class*="_regen"] button,
-html[data-vyom-theme] div[class*="_like"] button,
-html[data-vyom-theme] div[class*="_dislike"] button,
-html[data-vyom-theme] [data-testid="stPopover"] button,
-html[data-vyom-theme] button[id^="copy-reply-"] {
+html[data-vyom-theme] button.vyom-copy {
+    box-sizing: border-box !important;
     width: 32px !important;
     height: 32px !important;
     min-width: 32px !important;
@@ -117,6 +289,7 @@ html[data-vyom-theme] button[id^="copy-reply-"] {
     min-height: 32px !important;
     max-height: 32px !important;
     padding: 0 !important;
+    margin: 0 !important;
     border-radius: 50% !important;
     background: transparent !important;
     border: 1px solid var(--vyom-border) !important;
@@ -126,20 +299,32 @@ html[data-vyom-theme] button[id^="copy-reply-"] {
     justify-content: center !important;
     box-shadow: none !important;
     cursor: pointer !important;
+    line-height: 1 !important;
     transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease !important;
+}
+
+/* the zero-width label inside icon-only buttons must not take space */
+html[data-vyom-theme] div[class*="_actions"] button [data-testid="stMarkdownContainer"],
+html[data-vyom-theme] div[class*="_regen"] button [data-testid="stMarkdownContainer"] {
+    display: none !important;
+}
+
+html[data-vyom-theme] div[class*="_actions"] button [data-testid="stIconMaterial"],
+html[data-vyom-theme] div[class*="_regen"] button [data-testid="stIconMaterial"] {
+    color: currentColor !important;
+    font-size: 18px !important;
+    margin: 0 !important;
 }
 
 html[data-vyom-theme] div[class*="_actions"] button:hover,
 html[data-vyom-theme] div[class*="_regen"] button:hover,
-html[data-vyom-theme] div[class*="_like"] button:hover,
-html[data-vyom-theme] div[class*="_dislike"] button:hover,
-html[data-vyom-theme] [data-testid="stPopover"] button:hover,
-html[data-vyom-theme] button[id^="copy-reply-"]:hover {
+html[data-vyom-theme] button.vyom-copy:hover {
     background: var(--vyom-soft) !important;
     border-color: var(--vyom-accent-2) !important;
     color: var(--vyom-strong) !important;
 }
 
+/* selected like / dislike */
 html[data-vyom-theme] div[class*="_like"] button[data-testid="stBaseButton-primary"],
 html[data-vyom-theme] div[class*="_dislike"] button[data-testid="stBaseButton-primary"] {
     background: var(--vyom-hl) !important;
@@ -147,8 +332,36 @@ html[data-vyom-theme] div[class*="_dislike"] button[data-testid="stBaseButton-pr
     color: var(--vyom-strong) !important;
 }
 
+/* share popover trigger: a small pill (icon + chevron) */
+html[data-vyom-theme] div[class*="_actions"] [data-testid="stPopover"] button,
+html[data-vyom-theme] div[class*="_actions"] button[data-testid="stPopoverButton"] {
+    width: auto !important;
+    min-width: 32px !important;
+    max-width: none !important;
+    padding: 0 8px !important;
+    border-radius: 16px !important;
+    gap: 2px !important;
+}
+
+html[data-vyom-theme] div[class*="_actions"] [data-testid="stPopover"] {
+    width: auto !important;
+}
+
+/* custom copy button (static markup, handled by the global script) */
+button.vyom-copy svg {
+    width: 16px;
+    height: 16px;
+    display: block;
+    pointer-events: none;
+}
+
+button.vyom-copy .vyom-done { display: none; }
+button.vyom-copy.copied .vyom-done { display: block; }
+button.vyom-copy.copied .vyom-copy-icon { display: none; }
+button.vyom-copy.copied { color: var(--vyom-accent-2) !important; }
+
 /* ============================================================
-   CHAT INPUT & APP TITLE
+   CHAT INPUT
    ============================================================ */
 
 html[data-vyom-theme] [data-testid="stChatInput"] > div {
@@ -159,9 +372,46 @@ html[data-vyom-theme] [data-testid="stChatInput"] > div {
     box-shadow: 0 5px 22px var(--vyom-shadow) !important;
 }
 
-.st-key-app_title h1 {
-    background: linear-gradient(100deg, #e77abf, #9b83e8 55%, #53b9d4);
-    -webkit-background-clip: text;
-    background-clip: text;
+html[data-vyom-theme] [data-testid="stChatInput"] textarea {
+    background: transparent !important;
+    color: var(--vyom-fg) !important;
+    -webkit-text-fill-color: var(--vyom-fg) !important;
+}
+
+html[data-vyom-theme] [data-testid="stChatInput"] textarea::placeholder {
+    color: var(--vyom-dim) !important;
+    -webkit-text-fill-color: var(--vyom-dim) !important;
+}
+
+html[data-vyom-theme] [data-testid="stChatInput"] button {
+    color: var(--vyom-fg) !important;
+    background: var(--vyom-soft) !important;
+    border: 1px solid var(--vyom-border) !important;
+}
+
+html[data-vyom-theme] [data-testid="stChatInput"] button svg {
+    fill: currentColor !important;
+}
+
+/* ============================================================
+   FLOATING BUTTONS
+   ============================================================ */
+
+#vyom-scroll-down,
+#vyom-pause {
+    background: var(--vyom-pop) !important;
+    color: var(--vyom-strong) !important;
+    border: 1px solid var(--vyom-border) !important;
+}
+
+/* ============================================================
+   APP TITLE (keep last so it wins)
+   ============================================================ */
+
+.stApp .st-key-app_title h1 {
+    background: linear-gradient(100deg, #e77abf, #9b83e8 55%, #53b9d4) !important;
+    -webkit-background-clip: text !important;
+    background-clip: text !important;
     color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
 }
