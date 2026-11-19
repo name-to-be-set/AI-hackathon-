@@ -5,6 +5,7 @@ import os
 import random
 import re
 import uuid
+from urllib.parse import quote
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from io import BytesIO
@@ -22,6 +23,7 @@ from streamlit.errors import StreamlitAPIException, StreamlitSecretNotFoundError
 
 from agent import run_research_stream, transcribe_audio
 from attachments import run_attachment_stream
+import patches  # noqa: F401  (formatting rules + free image generation)
 
 
 def _load_streamlit_secrets_into_environment() -> None:
@@ -40,6 +42,8 @@ def _load_streamlit_secrets_into_environment() -> None:
         if value is not None and str(value).strip():
             os.environ[name] = str(value)
 
+
+DEFAULT_APP_URL = "https://ai-research-assistant-sw7p.onrender.com"
 
 CHAT_PLACEHOLDERS = (
     "Ask me anything...",
@@ -350,6 +354,84 @@ def _render_images(images: object) -> None:
             continue
 
 
+def _copy_icon_html(key_prefix: str, report: str) -> str:
+    encoded = base64.b64encode(report.encode("utf-8")).decode("ascii")
+    return f"""
+    <button id="copy-reply-{key_prefix}" type="button" aria-label="Copy reply" title="Copy"
+        style="display:flex;align-items:center;justify-content:center;width:38px;height:38px;
+        background:transparent;border:0;color:var(--vyom-dim);cursor:pointer;padding:0;"></button>
+    <script>
+    (() => {{
+        const button = document.getElementById("copy-reply-{key_prefix}");
+        const COPY = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+        const DONE = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+        button.innerHTML = COPY;
+        const text = new TextDecoder().decode(
+            Uint8Array.from(atob("{encoded}"), c => c.charCodeAt(0))
+        );
+        let timer;
+        const done = () => {{
+            button.innerHTML = DONE;
+            clearTimeout(timer);
+            timer = setTimeout(() => {{ button.innerHTML = COPY; }}, 1500);
+        }};
+        button.addEventListener("click", async () => {{
+            try {{
+                await navigator.clipboard.writeText(text);
+                done();
+            }} catch {{
+                const input = document.createElement("textarea");
+                input.value = text;
+                document.body.appendChild(input);
+                input.select();
+                const ok = document.execCommand("copy");
+                input.remove();
+                if (ok) done();
+            }}
+        }});
+    }})();
+    </script>
+    """
+
+
+def _native_share_html(key_prefix: str, report: str) -> str:
+    encoded = base64.b64encode(report.encode("utf-8")).decode("ascii")
+    return f"""
+    <button id="native-share-{key_prefix}" type="button"
+        style="display:none;width:100%;padding:0.5rem 0.8rem;border-radius:0.5rem;
+        border:1px solid var(--vyom-border);background:transparent;color:inherit;
+        font:inherit;cursor:pointer;text-align:left;">
+        Share with your phone apps…
+    </button>
+    <script>
+    (() => {{
+        const button = document.getElementById("native-share-{key_prefix}");
+        if (!button || !navigator.share) return;
+        button.style.display = "block";
+        const text = new TextDecoder().decode(
+            Uint8Array.from(atob("{encoded}"), c => c.charCodeAt(0))
+        );
+        button.addEventListener("click", () => {{
+            navigator.share({{ title: "VYOM reply", text: text }}).catch(() => {{}});
+        }});
+    }})();
+    </script>
+    """
+
+
+def _share_links(report: str) -> list[tuple[str, str]]:
+    app_url = os.getenv("APP_PUBLIC_URL", DEFAULT_APP_URL)
+    short = report if len(report) <= 1500 else report[:1500].rsplit(" ", 1)[0] + "…"
+    tweet = report if len(report) <= 240 else report[:237].rsplit(" ", 1)[0] + "…"
+    return [
+        ("WhatsApp", f"https://wa.me/?text={quote(short, safe='')}"),
+        ("Telegram", f"https://t.me/share/url?url={quote(app_url, safe='')}&text={quote(short, safe='')}"),
+        ("X (Twitter)", f"https://twitter.com/intent/tweet?text={quote(tweet, safe='')}"),
+        ("Facebook (shares the app link)", f"https://www.facebook.com/sharer/sharer.php?u={quote(app_url, safe='')}"),
+        ("Email", f"mailto:?subject={quote('VYOM reply', safe='')}&body={quote(short, safe='')}"),
+    ]
+
+
 def _render_reply_actions(
     message: dict,
     key_prefix: str,
@@ -397,57 +479,26 @@ def _render_reply_actions(
                 type="tertiary",
                 on_click=_regenerate,
             )
-        if st.button("Share", key=f"{key_prefix}_share", type="tertiary"):
-            st.session_state["share_message"] = key_prefix
-
-        encoded_report = base64.b64encode(report.encode("utf-8")).decode("ascii")
-        st.html(
-            f"""
-            <button id="copy-reply-{key_prefix}" type="button" aria-label="Copy reply"
-                style="display:flex;align-items:center;justify-content:center;
-                height:40px;box-sizing:border-box;background:transparent;
-                border:0;color:#e5e7eb;font:inherit;font-size:0.9rem;padding:0 8px;
-                cursor:pointer;white-space:nowrap;">
-                Copy
-            </button>
-            <script>
-            (() => {{
-                const button = document.getElementById("copy-reply-{key_prefix}");
-                const text = new TextDecoder().decode(
-                    Uint8Array.from(atob("{encoded_report}"), character =>
-                        character.charCodeAt(0))
-                );
-                let resetTimer;
-                const showCopied = () => {{
-                    button.textContent = "Copied";
-                    clearTimeout(resetTimer);
-                    resetTimer = setTimeout(() => {{
-                        button.textContent = "Copy";
-                    }}, 1500);
-                }};
-                button.addEventListener("click", async () => {{
-                    try {{
-                        await navigator.clipboard.writeText(text);
-                        showCopied();
-                    }} catch {{
-                        const input = document.createElement("textarea");
-                        input.value = text;
-                        document.body.appendChild(input);
-                        input.select();
-                        const copied = document.execCommand("copy");
-                        input.remove();
-                        if (copied) {{
-                            showCopied();
-                        }} else {{
-                            button.textContent = "Copy unavailable";
-                        }}
-                    }}
-                }});
-            }})();
-            </script>
-            """,
-            unsafe_allow_javascript=True,
-        )
+        st.html(_copy_icon_html(key_prefix, report), unsafe_allow_javascript=True)
+        with st.popover(
+            "\u200b",
+            icon=":material/share:",
+            help="Share this reply",
+            type="tertiary",
+            key=f"{key_prefix}_sharepop",
+        ):
+            st.html(_native_share_html(key_prefix, report), unsafe_allow_javascript=True)
+            for label, url in _share_links(report):
+                st.link_button(label, url, width="stretch")
+            st.download_button(
+                "Save as .txt (Notepad)",
+                data=report,
+                file_name="vyom-reply.txt",
+                mime="text/plain",
+                key=f"{key_prefix}_txt",
+                icon=":material/description:",
+                width="stretch",
+            )
 
     if isinstance(result, dict):
         sources = result.get("sources")
@@ -469,15 +520,6 @@ def _render_reply_actions(
             help="Download this reply as a PDF",
             width="content",
         )
-
-    if st.session_state.get("share_message") == key_prefix:
-        with st.expander(
-            "Share this reply",
-            expanded=True,
-            key=f"{key_prefix}_share_text",
-        ):
-            st.caption("Copy the text below to share this reply.")
-            st.code(report, language=None, wrap_lines=True)
 
 
 def _conversation_history(messages: list[dict]) -> list[dict[str, str]]:
@@ -630,9 +672,18 @@ BASE_CSS = """
     --vyom-soft: rgba(255, 255, 255, 0.08);
     --vyom-border: rgba(255, 255, 255, 0.14);
     --vyom-pop: rgba(30, 30, 34, 0.94);
-    /* Tune only if the pause button is not exactly on top of the send arrow */
-    --stop-right: 1.9rem;
-    --stop-bottom: 1.45rem;
+    --vyom-hl: rgba(250, 204, 21, 0.16);
+    --vyom-invert: #111111;
+
+    /* ================= FONT SIZES: change these numbers ================= */
+    --fs-body: 1rem;        /* normal text in replies */
+    --fs-h1: 1.6rem;        /* # Heading */
+    --fs-h2: 1.3rem;        /* ## Heading */
+    --fs-h3: 1.12rem;       /* ### Heading */
+    --fs-small: 0.85rem;    /* small grey text, "Thinking" steps */
+    --fs-table: 0.85rem;    /* tables */
+    --fs-title: 2.1rem;     /* the VYOM name at the top */
+    --fs-greeting: 3rem;    /* big greeting on the first screen */
 }
 
 .stApp { font-family: "DM Sans", "Segoe UI", system-ui, sans-serif; }
@@ -663,7 +714,7 @@ section.main > div {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     border-collapse: collapse;
-    font-size: 0.85rem;
+    font-size: var(--fs-table);
 }
 [data-testid="stMarkdownContainer"] th,
 [data-testid="stMarkdownContainer"] td {
@@ -680,7 +731,7 @@ header[data-testid="stHeader"] { background: transparent; }
 .st-key-app_title div[data-testid="stMarkdownContainer"] h1 {
     margin: 0; padding: 0;
     font-family: "Cormorant Garamond", Georgia, serif;
-    font-size: 2.1rem; font-style: italic; font-weight: 700;
+    font-size: var(--fs-title); font-style: italic; font-weight: 700;
     letter-spacing: 0.18em; line-height: 1; text-transform: uppercase; white-space: nowrap;
 }
 
@@ -713,16 +764,27 @@ div[class*="st-key-user_msg_"] [data-testid="stMarkdownContainer"] p {
 
 div[class*="st-key-assistant_msg_"] { width: 100%; min-width: 0; margin-bottom: 0.8rem; }
 
-.greeting-text { font-size: clamp(2rem, 5vw, 3.4rem); font-weight: 600; line-height: 1.2; }
+.greeting-text { font-size: clamp(2rem, 5vw, var(--fs-greeting)); font-weight: 600; line-height: 1.2; }
 .jasmine-flower {
     flex: 0 0 auto; color: var(--vyom-strong);
     font-size: clamp(3rem, 7vw, 5rem); line-height: 1;
     filter: drop-shadow(0 0 0.8rem rgba(255, 255, 255, 0.28));
 }
 
-div[data-testid="stMarkdownContainer"] h1 { font-size: 1.65rem; font-weight: 700; }
-div[data-testid="stMarkdownContainer"] h2 { font-size: 1.35rem; font-weight: 700; }
-div[data-testid="stMarkdownContainer"] h3 { font-size: 1.12rem; font-weight: 600; }
+/* ---- Reply text: headings, bullets, highlights ---- */
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] li { font-size: var(--fs-body); line-height: 1.7; }
+[data-testid="stMarkdownContainer"] h1 { font-size: var(--fs-h1); font-weight: 700; line-height: 1.25; margin: 1.1rem 0 0.5rem; }
+[data-testid="stMarkdownContainer"] h2 { font-size: var(--fs-h2); font-weight: 700; line-height: 1.3; margin: 1.1rem 0 0.45rem; padding-bottom: 0.25rem; border-bottom: 1px solid var(--vyom-border); }
+[data-testid="stMarkdownContainer"] h3 { font-size: var(--fs-h3); font-weight: 600; line-height: 1.35; margin: 0.9rem 0 0.35rem; }
+[data-testid="stMarkdownContainer"] ul,
+[data-testid="stMarkdownContainer"] ol { padding-left: 1.4rem; margin: 0.4rem 0 0.8rem; }
+[data-testid="stMarkdownContainer"] li { margin: 0.25rem 0; }
+[data-testid="stMarkdownContainer"] li::marker { color: var(--vyom-dim); }
+[data-testid="stMarkdownContainer"] strong { font-weight: 700; background: var(--vyom-hl); border-radius: 0.25rem; padding: 0 0.2em; }
+[data-testid="stMarkdownContainer"] blockquote { border-left: 3px solid var(--vyom-border); padding-left: 0.9rem; color: var(--vyom-dim); }
+[data-testid="stMarkdownContainer"] :not(pre) > code { background: var(--vyom-soft); padding: 0.1em 0.35em; border-radius: 0.3rem; font-size: 0.9em; }
+[data-testid="stCaptionContainer"] { font-size: var(--fs-small); }
 
 /* ---- Loading animation ---- */
 .vyom-loader { display: flex; align-items: center; gap: 0.6rem; color: var(--vyom-dim); font-size: 0.9rem; padding: 0.3rem 0; }
@@ -739,36 +801,34 @@ div[data-testid="stMarkdownContainer"] h3 { font-size: 1.12rem; font-weight: 600
 }
 @media (prefers-reduced-motion: reduce) { .vyom-dots span { animation: none; opacity: 0.7; } }
 
-/* ---- Reply action row (icon-only like / dislike / regenerate) ---- */
-div[class*="_actions"] { flex-wrap: nowrap !important; gap: 0.15rem !important; }
+/* ---- Reply action row (icon-only: like, dislike, regenerate, copy, share) ---- */
+div[class*="_actions"] { flex-wrap: nowrap !important; gap: 0.1rem !important; align-items: center; }
 div[class*="_actions"] button,
 div[class*="_regen"] button {
-    min-width: 2.4rem !important;
-    white-space: nowrap !important;
-    padding-inline: 0.4rem !important;
-    font-size: 0.85rem !important;
+    min-width: 2.3rem !important;
+    padding-inline: 0.35rem !important;
     background: transparent !important;
     border-color: transparent !important;
+    box-shadow: none !important;
 }
-div[class*="_like"] button[data-testid="stBaseButton-tertiary"] span[data-testid="stIconMaterial"],
-div[class*="_dislike"] button[data-testid="stBaseButton-tertiary"] span[data-testid="stIconMaterial"],
-div[class*="_regen"] button span[data-testid="stIconMaterial"] {
-    color: var(--vyom-dim);
-    font-variation-settings: "FILL" 0;
-}
+/* icons that are "off": dim */
+div[class*="_actions"] button span[data-testid="stIconMaterial"],
+div[class*="_regen"] button span[data-testid="stIconMaterial"] { color: var(--vyom-dim) !important; }
+div[class*="_actions"] button:hover span[data-testid="stIconMaterial"] { color: var(--vyom-strong) !important; }
+/* pressed like / dislike: solid icon, white in dark theme and black in light theme */
 div[class*="_like"] button[data-testid="stBaseButton-primary"] span[data-testid="stIconMaterial"],
-div[class*="_dislike"] button[data-testid="stBaseButton-primary"] span[data-testid="stIconMaterial"] {
-    color: var(--vyom-strong);
-    font-variation-settings: "FILL" 1;
-}
+div[class*="_dislike"] button[data-testid="stBaseButton-primary"] span[data-testid="stIconMaterial"] { color: var(--vyom-strong) !important; }
 
-/* ---- Pause button: JS moves it exactly onto the send arrow ---- */
-.st-key-stop_generation { position: fixed; z-index: 1001; width: 32px; right: var(--stop-right); bottom: var(--stop-bottom); }
-.st-key-stop_generation button {
-    display: flex; align-items: center; justify-content: center;
-    width: 32px; height: 32px; min-height: 32px; padding: 0; border-radius: 50%;
-    color: var(--vyom-strong); background: var(--vyom-soft); border: 1px solid var(--vyom-border);
+/* ---- Pause button ----
+   The real Streamlit stop button stays hidden. The round pause button below is made
+   by JavaScript and placed exactly on top of the send arrow while the bot is thinking. */
+.st-key-stop_generation { position: absolute !important; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
+#vyom-pause {
+    position: fixed; z-index: 1000003; display: none; align-items: center; justify-content: center;
+    width: 32px; height: 32px; padding: 0; border-radius: 50%; cursor: pointer;
+    border: 1px solid var(--vyom-border); background: var(--vyom-strong); color: var(--vyom-invert);
 }
+#vyom-pause.show { display: flex; }
 
 /* ---- Search box: same column as the messages ---- */
 div[data-testid="stBottomBlockContainer"] { max-width: none !important; padding-inline: 1.25rem !important; }
@@ -840,7 +900,6 @@ section[data-testid="stSidebar"] button[data-testid="stBaseButton-primary"] {
     [data-testid="stMainBlockContainer"],
     section.main > div { padding: 3.5rem 0.5rem 5rem; }
     div[data-testid="stBottomBlockContainer"] { padding-inline: 0.5rem !important; }
-    :root { --stop-right: 1.2rem; --stop-bottom: 1.1rem; }
 }
 </style>
 """
@@ -850,16 +909,29 @@ LIGHT_CSS = """
 :root {
     --vyom-fg: #111827;
     --vyom-strong: #000000;
-    --vyom-dim: rgba(0, 0, 0, 0.5);
+    --vyom-dim: rgba(0, 0, 0, 0.55);
     --vyom-soft: rgba(0, 0, 0, 0.05);
-    --vyom-border: rgba(0, 0, 0, 0.14);
-    --vyom-pop: rgba(255, 255, 255, 0.96);
+    --vyom-border: rgba(0, 0, 0, 0.16);
+    --vyom-pop: rgba(255, 255, 255, 0.97);
+    --vyom-hl: rgba(250, 204, 21, 0.4);
+    --vyom-invert: #ffffff;
 }
 .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"],
 [data-testid="stBottom"], [data-testid="stBottom"] > div { background: #ffffff !important; color: #111827 !important; }
 [data-testid="stSidebar"], [data-testid="stSidebar"] > div { background: #f3f4f6 !important; }
 .stApp p, .stApp li, .stApp label, .stApp h1, .stApp h2, .stApp h3, .stApp h4,
-.stApp td, .stApp th, .stApp [data-testid="stCaptionContainer"] { color: #111827 !important; }
+.stApp td, .stApp th, .stApp summary, .stApp [data-testid="stCaptionContainer"] { color: #111827 !important; }
+[data-testid="stHeader"], [data-testid="stHeader"] * { color: #111827 !important; }
+[data-testid="stChatInput"] textarea { color: #111827 !important; }
+button[data-testid^="stBaseButton"] { color: #111827 !important; border-color: rgba(0, 0, 0, 0.22) !important; }
+button[data-testid^="stBaseButton"] p,
+button[data-testid^="stBaseButton"] span { color: #111827 !important; }
+[data-testid="stSidebar"] button[data-testid="stBaseButton-primary"] { background: rgba(0, 0, 0, 0.08) !important; }
+[data-testid="stMarkdownContainer"] table, [data-testid="stMarkdownContainer"] th,
+[data-testid="stMarkdownContainer"] td { border-color: rgba(0, 0, 0, 0.16) !important; }
+[data-testid="stExpander"] details { border-color: rgba(0, 0, 0, 0.16) !important; }
+[data-testid="stPopoverBody"], [data-baseweb="popover"] > div { background: #ffffff !important; color: #111827 !important; }
+[data-baseweb="popover"] * { color: #111827 !important; }
 .jasmine-flower { filter: none; }
 </style>
 """
@@ -915,50 +987,85 @@ else:
                 unsafe_allow_html=True,
             )
 
-# Floating helpers (created once per page load): scroll-to-latest arrow, and
-# placing the pause button exactly on top of the send arrow.
+# Floating helpers (created once per page load): scroll-to-latest arrow, and the
+# pause button that sits exactly on top of the send arrow while the bot is thinking.
 st.html(
     """
     <script>
     (() => {
         if (window.__vyomInit) return;
         window.__vyomInit = true;
-        const button = document.createElement("button");
-        button.id = "vyom-scroll-down";
-        button.type = "button";
-        button.setAttribute("aria-label", "Scroll to latest message");
-        button.innerHTML =
-            '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" ' +
-            'stroke="currentColor" stroke-width="2.4" stroke-linecap="round" ' +
-            'stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
-        document.body.appendChild(button);
+
+        const down = document.createElement("button");
+        down.id = "vyom-scroll-down";
+        down.type = "button";
+        down.setAttribute("aria-label", "Scroll to latest message");
+        down.innerHTML =
+            '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+            'stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
+        document.body.appendChild(down);
+
+        const pause = document.createElement("button");
+        pause.id = "vyom-pause";
+        pause.type = "button";
+        pause.setAttribute("aria-label", "Stop response");
+        pause.innerHTML =
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">' +
+            '<rect x="5" y="4" width="5" height="16" rx="1.2"/><rect x="14" y="4" width="5" height="16" rx="1.2"/></svg>';
+        document.body.appendChild(pause);
+
         const scroller = () =>
             document.querySelector('[data-testid="stMain"]') ||
             document.querySelector("section.main") ||
             document.scrollingElement;
-        const update = () => {
+
+        const findSend = () => {
+            const box = document.querySelector('[data-testid="stChatInput"]');
+            if (!box) return null;
+            const direct = box.querySelector('[data-testid="stChatInputSubmitButton"]');
+            if (direct) return direct;
+            const skip = /attach|upload|file|add|mic|record|audio|voice/i;
+            const buttons = [...box.querySelectorAll("button")].filter(b =>
+                !skip.test((b.getAttribute("aria-label") || "") + " " + (b.getAttribute("title") || "")));
+            return buttons[buttons.length - 1] || null;
+        };
+
+        let hiddenSend = null;
+        const syncPause = () => {
+            const source = document.querySelector(".st-key-stop_generation button");
+            const send = findSend();
+            if (source && send) {
+                const r = send.getBoundingClientRect();
+                if (r.width) {
+                    pause.style.left = (r.left + r.width / 2 - 16) + "px";
+                    pause.style.top = (r.top + r.height / 2 - 16) + "px";
+                    pause.classList.add("show");
+                    send.style.visibility = "hidden";
+                    hiddenSend = send;
+                    return;
+                }
+            }
+            pause.classList.remove("show");
+            if (hiddenSend) { hiddenSend.style.visibility = ""; hiddenSend = null; }
+        };
+
+        const syncDown = () => {
             const el = scroller();
             if (!el) return;
             const away = el.scrollHeight - el.scrollTop - el.clientHeight;
-            button.classList.toggle("show", away > 300);
+            down.classList.toggle("show", away > 300);
         };
-        const placeStop = () => {
-            const stop = document.querySelector(".st-key-stop_generation");
-            const send = document.querySelector('[data-testid="stChatInputSubmitButton"]');
-            if (!stop || !send) return;
-            const r = send.getBoundingClientRect();
-            if (!r.width) return;
-            stop.style.left = (r.left + r.width / 2 - 16) + "px";
-            stop.style.top = (r.top + r.height / 2 - 16) + "px";
-            stop.style.right = "auto";
-            stop.style.bottom = "auto";
-        };
-        button.addEventListener("click", () => {
+
+        pause.addEventListener("click", () => {
+            const source = document.querySelector(".st-key-stop_generation button");
+            if (source) source.click();
+        });
+        down.addEventListener("click", () => {
             const el = scroller();
             if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
         });
-        document.addEventListener("scroll", update, true);
-        setInterval(() => { update(); placeStop(); }, 150);
+        document.addEventListener("scroll", syncDown, true);
+        setInterval(() => { syncDown(); syncPause(); }, 100);
     })();
     </script>
     """,
@@ -1027,14 +1134,10 @@ if has_input:
             messages.append(assistant_message)
             st.session_state["generation_active"] = True
 
-            # While the bot works: hide the send arrow, show the pause button on it.
-            st.markdown(
-                "<style>[data-testid='stChatInputSubmitButton']"
-                "{visibility:hidden !important;}</style>",
-                unsafe_allow_html=True,
-            )
+            # Hidden Streamlit button. While it exists, the JavaScript above shows the
+            # round pause button on the send arrow and presses this one when clicked.
             st.button(
-                "⏸",
+                "Stop",
                 key="stop_generation",
                 help="Stop the current response",
                 on_click=_stop_generation,
