@@ -433,10 +433,8 @@ def _time_greeting(hour: int | None = None) -> str:
 
 
 
-
-def _visible_report(report: str) -> str:
-
-    return re.sub(r"\s***\[**(?:\d+(?:\s*,\s*\d+)*)**\]**", "", report)
+def _visible_report(report):
+    return re.sub(r"\s*\[\d+(?:\s*,\s*\d+)*\]", "", report)
 
 
 
