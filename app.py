@@ -91,7 +91,10 @@ FILE_TYPES = ["pdf", "png", "jpg", "jpeg", "webp", "txt", "md", "csv"]
 # ---------------------------------------------------------------------------
 
 def _resolve_renderer_theme() -> str:
-    """Resolve theme strictly from the renderer ('Light', 'Dark', or 'System')."""
+    """Resolve theme from query params, session state, or system."""
+    if "user_theme_override" in st.session_state:
+        return st.session_state["user_theme_override"]
+
     raw = (
         st.query_params.get("theme")
         or st.query_params.get("renderer_theme")
@@ -835,6 +838,13 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+# Active Stop Button during generation in header area
+if st.session_state.get("generation_active", False):
+    col_spacer, col_stop = st.columns([10, 1])
+    with col_stop:
+        if st.button("Stop", key="global_stop_btn", type="primary"):
+            _stop_generation()
+            st.rerun()
 
 BASE_CSS = """
 <style>

@@ -1,77 +1,54 @@
 /* ============================================================
    VYOM — Complete Theme Layer
-   Static, clean dark/light themes with rich background assets
    ============================================================ */
-
-/* -------------------- Theme variables -------------------- */
 
 :root {
     color-scheme: dark;
-
     --vyom-bg: #080a13;
     --vyom-panel: rgba(17, 21, 36, 0.92);
     --vyom-panel-hover: rgba(27, 33, 52, 0.95);
-
     --vyom-fg: #edf1fa;
     --vyom-strong: #ffffff;
     --vyom-dim: #aab5c9;
-
     --vyom-border: rgba(160, 177, 205, 0.25);
     --vyom-soft: rgba(130, 151, 190, 0.12);
     --vyom-hl: rgba(100, 151, 220, 0.20);
-
     --vyom-accent: #8c78e8;
     --vyom-accent-2: #48b6ce;
-
     --vyom-user-bg: #202a3e;
     --vyom-user-border: rgba(132, 157, 199, 0.25);
-
     --vyom-shadow: rgba(0, 0, 0, 0.35);
 }
 
-/* -------------------- Light theme -------------------- */
-
 html[data-vyom-theme="light"] {
     color-scheme: light;
-
     --vyom-bg: #f3f6fb;
     --vyom-panel: rgba(255, 255, 255, 0.94);
     --vyom-panel-hover: rgba(246, 249, 255, 0.98);
-
     --vyom-fg: #1c2b42;
     --vyom-strong: #101d32;
     --vyom-dim: #5c6d83;
-
     --vyom-border: rgba(65, 100, 143, 0.24);
     --vyom-soft: rgba(220, 231, 245, 0.75);
     --vyom-hl: rgba(67, 133, 202, 0.14);
-
     --vyom-accent: #8263cf;
     --vyom-accent-2: #258eae;
-
     --vyom-user-bg: #e5edf8;
     --vyom-user-border: rgba(75, 112, 157, 0.22);
-
     --vyom-shadow: rgba(35, 61, 92, 0.06);
 }
 
-/* -------------------- Dark theme -------------------- */
-
 html[data-vyom-theme="dark"] {
     color-scheme: dark;
-
     --vyom-bg: #080a13;
     --vyom-panel: rgba(17, 21, 36, 0.92);
     --vyom-panel-hover: rgba(27, 33, 52, 0.95);
-
     --vyom-fg: #edf1fa;
     --vyom-strong: #ffffff;
     --vyom-dim: #b9c4d9;
-
     --vyom-border: rgba(160, 177, 205, 0.28);
     --vyom-soft: rgba(130, 151, 190, 0.12);
     --vyom-hl: rgba(100, 151, 220, 0.20);
-
     --vyom-user-bg: #202a3e;
     --vyom-user-border: rgba(132, 157, 199, 0.25);
 }
@@ -80,11 +57,7 @@ html[data-vyom-theme="dark"] {
    PAGE BACKGROUNDS
    ============================================================ */
 
-html,
-body,
-.stApp,
-[data-testid="stAppViewContainer"],
-[data-testid="stMain"] {
+html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
     color: var(--vyom-fg) !important;
 }
 
@@ -94,63 +67,88 @@ body,
     background-position: center center !important;
     background-repeat: no-repeat !important;
     background-attachment: fixed !important;
-    transition: background 0.3s ease-in-out !important;
 }
 
 html[data-vyom-theme="dark"] .stApp {
-    background-image:
-        linear-gradient(rgba(8, 10, 19, 0.4), rgba(8, 10, 19, 0.4)),
-        url("app/static/dark_bg.jpg") !important;
+    background-image: linear-gradient(rgba(8, 10, 19, 0.5), rgba(8, 10, 19, 0.5)), url("./static/dark_bg.jpg") !important;
 }
 
 html[data-vyom-theme="light"] .stApp {
-    background-image:
-        linear-gradient(rgba(243, 246, 251, 0.4), rgba(243, 246, 251, 0.4)),
-        url("app/static/light_bg.jpg") !important;
+    background-image: linear-gradient(rgba(243, 246, 251, 0.5), rgba(243, 246, 251, 0.5)), url("./static/light_bg.jpg") !important;
 }
 
 /* ============================================================
-   GENERAL TEXT
+   HIDE THINKING AREA WHEN WORKING
    ============================================================ */
 
-[data-testid="stMarkdownContainer"],
-[data-testid="stMarkdownContainer"] p,
-[data-testid="stMarkdownContainer"] li,
-[data-testid="stMarkdownContainer"] h1,
-[data-testid="stMarkdownContainer"] h2,
-[data-testid="stMarkdownContainer"] h3,
-[data-testid="stMarkdownContainer"] h4,
-[data-testid="stMarkdownContainer"] h5,
-[data-testid="stMarkdownContainer"] h6,
-[data-testid="stMarkdownContainer"] blockquote,
-[data-testid="stMarkdownContainer"] td,
-[data-testid="stMarkdownContainer"] th,
-[data-testid="stCaptionContainer"],
-.stApp label {
-    color: var(--vyom-fg) !important;
+html[data-vyom-theme] [data-testid="stExpander"] {
+    display: none !important;
 }
 
-[data-testid="stMarkdownContainer"] strong {
+/* ============================================================
+   UNIFORM CIRCULAR ACTION BUTTONS (LIKE, DISLIKE, REGEN, COPY, SHARE)
+   ============================================================ */
+
+html[data-vyom-theme] div[class*="_actions"] [data-testid="stButton"],
+html[data-vyom-theme] div[class*="_regen"] [data-testid="stButton"],
+html[data-vyom-theme] div[class*="_like"] [data-testid="stButton"],
+html[data-vyom-theme] div[class*="_dislike"] [data-testid="stButton"],
+html[data-vyom-theme] [data-testid="stPopover"] [data-testid="stButton"] {
+    width: 32px !important;
+    height: 32px !important;
+    min-width: 32px !important;
+    max-width: 32px !important;
+    min-height: 32px !important;
+    max-height: 32px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+html[data-vyom-theme] div[class*="_actions"] button,
+html[data-vyom-theme] div[class*="_regen"] button,
+html[data-vyom-theme] div[class*="_like"] button,
+html[data-vyom-theme] div[class*="_dislike"] button,
+html[data-vyom-theme] [data-testid="stPopover"] button,
+html[data-vyom-theme] button[id^="copy-reply-"] {
+    width: 32px !important;
+    height: 32px !important;
+    min-width: 32px !important;
+    max-width: 32px !important;
+    min-height: 32px !important;
+    max-height: 32px !important;
+    padding: 0 !important;
+    border-radius: 50% !important;
+    background: transparent !important;
+    border: 1px solid var(--vyom-border) !important;
+    color: var(--vyom-dim) !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    box-shadow: none !important;
+    cursor: pointer !important;
+    transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease !important;
+}
+
+html[data-vyom-theme] div[class*="_actions"] button:hover,
+html[data-vyom-theme] div[class*="_regen"] button:hover,
+html[data-vyom-theme] div[class*="_like"] button:hover,
+html[data-vyom-theme] div[class*="_dislike"] button:hover,
+html[data-vyom-theme] [data-testid="stPopover"] button:hover,
+html[data-vyom-theme] button[id^="copy-reply-"]:hover {
+    background: var(--vyom-soft) !important;
+    border-color: var(--vyom-accent-2) !important;
     color: var(--vyom-strong) !important;
+}
+
+html[data-vyom-theme] div[class*="_like"] button[data-testid="stBaseButton-primary"],
+html[data-vyom-theme] div[class*="_dislike"] button[data-testid="stBaseButton-primary"] {
     background: var(--vyom-hl) !important;
-    border-radius: 3px;
-    padding: 0 2px;
+    border: 1px solid var(--vyom-accent-2) !important;
+    color: var(--vyom-strong) !important;
 }
 
 /* ============================================================
-   USER CHAT BUBBLES
-   ============================================================ */
-
-html[data-vyom-theme] div[class*="st-key-user_msg_"] [data-testid="stElementContainer"] {
-    background: var(--vyom-user-bg) !important;
-    border: 1px solid var(--vyom-user-border) !important;
-    color: var(--vyom-fg) !important;
-    border-radius: 16px !important;
-    box-shadow: 0 3px 14px var(--vyom-shadow) !important;
-}
-
-/* ============================================================
-   CHAT COMPOSER AND BOTTOM AREA
+   CHAT INPUT & APP TITLE
    ============================================================ */
 
 html[data-vyom-theme] [data-testid="stChatInput"] > div {
@@ -160,123 +158,6 @@ html[data-vyom-theme] [data-testid="stChatInput"] > div {
     color: var(--vyom-fg) !important;
     box-shadow: 0 5px 22px var(--vyom-shadow) !important;
 }
-
-html[data-vyom-theme] [data-testid="stChatInput"] > div:focus-within {
-    border-color: var(--vyom-accent-2) !important;
-    box-shadow: 0 0 0 2px var(--vyom-hl) !important;
-}
-
-html[data-vyom-theme] [data-testid="stChatInput"] textarea {
-    color: var(--vyom-fg) !important;
-    background: transparent !important;
-    caret-color: var(--vyom-accent-2) !important;
-}
-
-/* ============================================================
-   THINKING EXPANDER — 100% MERGED / TRANSPARENT
-   ============================================================ */
-
-html[data-vyom-theme] [data-testid="stExpander"],
-html[data-vyom-theme] [data-testid="stExpander"] > div,
-html[data-vyom-theme] [data-testid="stExpander"] details,
-html[data-vyom-theme] [data-testid="stExpander"] summary,
-html[data-vyom-theme] [data-testid="stExpander"] [data-testid="stExpanderDetails"] {
-    background: transparent !important;
-    background-color: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    border-radius: 0 !important;
-    padding-left: 0 !important;
-}
-
-html[data-vyom-theme] [data-testid="stExpander"] summary:hover {
-    background: transparent !important;
-    color: var(--vyom-strong) !important;
-}
-
-/* ============================================================
-   SIDEBAR & POPOVERS
-   ============================================================ */
-
-html[data-vyom-theme] [data-testid="stSidebar"] > div {
-    background: var(--vyom-panel) !important;
-    border-right: 1px solid var(--vyom-border) !important;
-}
-
-html[data-vyom-theme] [data-testid="stPopoverBody"],
-html[data-vyom-theme] [data-baseweb="popover"] > div {
-    background: var(--vyom-panel) !important;
-    color: var(--vyom-fg) !important;
-    border: 1px solid var(--vyom-border) !important;
-}
-
-/* ============================================================
-   STRICT CIRCULAR LIKE & DISLIKE BUTTONS ONLY
-   ============================================================ */
-
-html[data-vyom-theme] div[class*="_like"],
-html[data-vyom-theme] div[class*="_dislike"],
-html[data-vyom-theme] div[class*="_like"] [data-testid="stButton"],
-html[data-vyom-theme] div[class*="_dislike"] [data-testid="stButton"],
-html[data-vyom-theme] div[class*="_like"] > div,
-html[data-vyom-theme] div[class*="_dislike"] > div {
-    width: 32px !important;
-    height: 32px !important;
-    min-width: 32px !important;
-    max-width: 32px !important;
-    min-height: 32px !important;
-    max-height: 32px !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    display: inline-flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-}
-
-html[data-vyom-theme] div[class*="_like"] button,
-html[data-vyom-theme] div[class*="_dislike"] button {
-    width: 32px !important;
-    height: 32px !important;
-    min-width: 32px !important;
-    max-width: 32px !important;
-    min-height: 32px !important;
-    max-height: 32px !important;
-    padding: 0 !important;
-    border-radius: 50% !important;
-    background: transparent !important;
-    border: 1px solid transparent !important;
-    color: var(--vyom-dim) !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    box-shadow: none !important;
-    transition: background 0.2s ease, border-color 0.2s ease, transform 0.1s ease !important;
-}
-
-html[data-vyom-theme] div[class*="_like"] button:hover,
-html[data-vyom-theme] div[class*="_dislike"] button:hover {
-    background: var(--vyom-soft) !important;
-    border-color: var(--vyom-border) !important;
-    color: var(--vyom-strong) !important;
-}
-
-html[data-vyom-theme] div[class*="_like"] button:active,
-html[data-vyom-theme] div[class*="_dislike"] button:active {
-    transform: scale(0.90) !important;
-}
-
-html[data-vyom-theme] div[class*="_like"] button[data-testid="stBaseButton-primary"],
-html[data-vyom-theme] div[class*="_dislike"] button[data-testid="stBaseButton-primary"] {
-    background: var(--vyom-hl) !important;
-    border: 1px solid var(--vyom-accent-2) !important;
-    color: var(--vyom-strong) !important;
-    border-radius: 50% !important;
-    box-shadow: 0 0 10px var(--vyom-hl) !important;
-}
-
-/* ============================================================
-   APP TITLE GRADIENT
-   ============================================================ */
 
 .st-key-app_title h1 {
     background: linear-gradient(100deg, #e77abf, #9b83e8 55%, #53b9d4);
