@@ -1,7 +1,6 @@
-
 /* ============================================================
    VYOM — Complete Theme Layer
-   Static, clean dark/light themes
+   Static, clean dark/light themes with rich background assets
    ============================================================ */
 
 /* -------------------- Theme variables -------------------- */
@@ -10,8 +9,8 @@
     color-scheme: dark;
 
     --vyom-bg: #080a13;
-    --vyom-panel: rgba(17, 21, 36, 0.94);
-    --vyom-panel-hover: rgba(27, 33, 52, 0.96);
+    --vyom-panel: rgba(17, 21, 36, 0.92);
+    --vyom-panel-hover: rgba(27, 33, 52, 0.95);
 
     --vyom-fg: #edf1fa;
     --vyom-strong: #ffffff;
@@ -27,7 +26,7 @@
     --vyom-user-bg: #202a3e;
     --vyom-user-border: rgba(132, 157, 199, 0.25);
 
-    --vyom-shadow: rgba(0, 0, 0, 0.20);
+    --vyom-shadow: rgba(0, 0, 0, 0.35);
 }
 
 /* -------------------- Light theme -------------------- */
@@ -53,7 +52,7 @@ html[data-vyom-theme="light"] {
     --vyom-user-bg: #e5edf8;
     --vyom-user-border: rgba(75, 112, 157, 0.22);
 
-    --vyom-shadow: rgba(35, 61, 92, 0.08);
+    --vyom-shadow: rgba(35, 61, 92, 0.06);
 }
 
 /* -------------------- Dark theme -------------------- */
@@ -62,8 +61,8 @@ html[data-vyom-theme="dark"] {
     color-scheme: dark;
 
     --vyom-bg: #080a13;
-    --vyom-panel: rgba(17, 21, 36, 0.94);
-    --vyom-panel-hover: rgba(27, 33, 52, 0.96);
+    --vyom-panel: rgba(17, 21, 36, 0.92);
+    --vyom-panel-hover: rgba(27, 33, 52, 0.95);
 
     --vyom-fg: #edf1fa;
     --vyom-strong: #ffffff;
@@ -78,7 +77,7 @@ html[data-vyom-theme="dark"] {
 }
 
 /* ============================================================
-   PAGE BACKGROUND
+   PAGE BACKGROUNDS
    ============================================================ */
 
 html,
@@ -87,61 +86,30 @@ body,
 [data-testid="stAppViewContainer"],
 [data-testid="stMain"] {
     color: var(--vyom-fg) !important;
-    background: var(--vyom-bg) !important;
 }
 
+/* Main background layering with customized properties */
 .stApp {
     background-color: var(--vyom-bg) !important;
-    background-image:
-        radial-gradient(
-            ellipse 45rem 32rem at 100% 0%,
-            rgba(27, 95, 150, 0.13),
-            transparent 70%
-        ),
-        radial-gradient(
-            ellipse 40rem 30rem at 0% 100%,
-            rgba(105, 55, 125, 0.11),
-            transparent 70%
-        ) !important;
+    background-size: cover !important;
+    background-position: center center !important;
+    background-repeat: no-repeat !important;
     background-attachment: fixed !important;
+    transition: background 0.3s ease-in-out !important;
 }
 
-/* Subtle static red/green side accents in dark mode.
-   These are intentionally not animated. */
-
+/* 1. Dark theme configuration */
 html[data-vyom-theme="dark"] .stApp {
     background-image:
-        radial-gradient(
-            ellipse 30rem 42rem at -12% 48%,
-            rgba(170, 55, 70, 0.10),
-            transparent 72%
-        ),
-        radial-gradient(
-            ellipse 30rem 42rem at 112% 52%,
-            rgba(35, 145, 105, 0.10),
-            transparent 72%
-        ),
-        radial-gradient(
-            ellipse 45rem 32rem at 50% 0%,
-            rgba(40, 80, 145, 0.10),
-            transparent 75%
-        ) !important;
+        linear-gradient(rgba(8, 10, 19, 0.2), rgba(8, 10, 19, 0.25)),
+        url("app/static/dark_bg.jpg") !important;
 }
 
-/* Light theme stays clean and bright. */
-
+/* 2. Light theme configuration */
 html[data-vyom-theme="light"] .stApp {
     background-image:
-        radial-gradient(
-            ellipse 45rem 32rem at 100% 0%,
-            rgba(90, 155, 215, 0.10),
-            transparent 72%
-        ),
-        radial-gradient(
-            ellipse 40rem 30rem at 0% 100%,
-            rgba(155, 115, 190, 0.07),
-            transparent 72%
-        ) !important;
+        linear-gradient(rgba(243, 246, 251, 0.1), rgba(243, 246, 251, 0.1)),
+        url("app/static/light_bg.jpg") !important;
 }
 
 /* ============================================================
@@ -209,8 +177,6 @@ html[data-vyom-theme] div[class*="st-key-user_msg_"] [data-testid="stElementCont
     box-shadow: 0 3px 14px var(--vyom-shadow) !important;
 }
 
-/* Keep user messages solid, without animated gradients. */
-
 html[data-vyom-theme="dark"] div[class*="st-key-user_msg_"] [data-testid="stElementContainer"] {
     background: #202a3e !important;
 }
@@ -227,19 +193,13 @@ html[data-vyom-theme] [data-testid="stBottom"],
 html[data-vyom-theme] [data-testid="stBottom"] > div,
 html[data-vyom-theme] [data-testid="stBottomBlockContainer"],
 html[data-vyom-theme] .stChatFloatingInputContainer {
-    background: var(--vyom-bg) !important;
+    background: transparent !important;
     color: var(--vyom-fg) !important;
     border-color: transparent !important;
 }
 
 html[data-vyom-theme] [data-testid="stBottom"] {
-    background: color-mix(
-        in srgb,
-        var(--vyom-bg) 92%,
-        transparent
-    ) !important;
-    backdrop-filter: blur(16px) !important;
-    -webkit-backdrop-filter: blur(16px) !important;
+    background: linear-gradient(transparent, var(--vyom-bg) 60%) !important;
 }
 
 html[data-vyom-theme] [data-testid="stBottom"]::before,
@@ -252,8 +212,6 @@ html[data-vyom-theme] .stChatFloatingInputContainer::before {
 html[data-vyom-theme] [data-testid="stBottomBlockContainer"] {
     background: transparent !important;
 }
-
-/* Actual input surface */
 
 html[data-vyom-theme] [data-testid="stChatInput"] {
     background: transparent !important;
@@ -292,20 +250,17 @@ html[data-vyom-theme] [data-testid="stChatInput"] button {
    ============================================================ */
 
 html[data-vyom-theme] [data-testid="stExpander"] {
-    background: transparent !important;
+    background: var(--vyom-panel) !important;
     border: 1px solid var(--vyom-border) !important;
     border-radius: 12px !important;
     overflow: hidden !important;
 }
 
-html[data-vyom-theme] [data-testid="stExpander"] details {
-    background: var(--vyom-panel) !important;
+html[data-vyom-theme] [data-testid="stExpander"] details,
+html[data-vyom-theme] [data-testid="stExpander"] summary,
+html[data-vyom-theme] [data-testid="stExpander"] [data-testid="stExpanderDetails"] {
+    background: transparent !important;
     border: 0 !important;
-    color: var(--vyom-fg) !important;
-}
-
-html[data-vyom-theme] [data-testid="stExpander"] summary {
-    background: var(--vyom-panel) !important;
     color: var(--vyom-fg) !important;
 }
 
@@ -314,13 +269,10 @@ html[data-vyom-theme] [data-testid="stExpander"] summary:hover {
 }
 
 html[data-vyom-theme] [data-testid="stExpander"] summary p,
-html[data-vyom-theme] [data-testid="stExpander"] summary span {
+html[data-vyom-theme] [data-testid="stExpander"] summary span,
+html[data-vyom-theme] [data-testid="stExpander"] summary svg {
     color: var(--vyom-fg) !important;
-}
-
-html[data-vyom-theme] [data-testid="stExpander"] [data-testid="stExpanderDetails"] {
-    background: var(--vyom-panel) !important;
-    color: var(--vyom-fg) !important;
+    fill: var(--vyom-fg) !important;
 }
 
 /* ============================================================
@@ -403,31 +355,61 @@ html[data-vyom-theme] button[id^="copy-reply-"]:hover {
 }
 
 /* ============================================================
-   LIKE, DISLIKE, REGENERATE AND OTHER ACTIONS
+   SMALL CIRCULAR LIKE, DISLIKE & ACTION BUTTONS
    ============================================================ */
 
 html[data-vyom-theme] div[class*="_actions"] button,
 html[data-vyom-theme] div[class*="_regen"] button,
 html[data-vyom-theme] [data-testid="stPopover"] button {
-    color: var(--vyom-fg) !important;
-    border-color: var(--vyom-border) !important;
+    width: 28px !important;
+    height: 28px !important;
+    min-width: 28px !important;
+    max-width: 28px !important;
+    padding: 0 !important;
+    border-radius: 50% !important;
+    background: transparent !important;
+    border: 1px solid transparent !important;
+    color: var(--vyom-dim) !important;
+    box-shadow: none !important;
 }
 
 html[data-vyom-theme] div[class*="_actions"] button:hover,
-html[data-vyom-theme] div[class*="_regen"] button:hover {
+html[data-vyom-theme] div[class*="_regen"] button:hover,
+html[data-vyom-theme] [data-testid="stPopover"] button:hover {
     background: var(--vyom-soft) !important;
-    border-color: var(--vyom-accent-2) !important;
+    border-color: var(--vyom-border) !important;
+    color: var(--vyom-strong) !important;
+}
+
+html[data-vyom-theme] div[class*="_like"] button[data-testid="stBaseButton-primary"],
+html[data-vyom-theme] div[class*="_dislike"] button[data-testid="stBaseButton-primary"] {
+    width: 28px !important;
+    height: 28px !important;
+    min-width: 28px !important;
+    max-width: 28px !important;
+    padding: 0 !important;
+    border-radius: 50% !important;
+    background: var(--vyom-soft) !important;
+    border: 1px solid var(--vyom-border) !important;
+    color: var(--vyom-strong) !important;
+    box-shadow: none !important;
+    filter: none !important;
 }
 
 html[data-vyom-theme] div[class*="_actions"] button span[data-testid="stIconMaterial"],
-html[data-vyom-theme] div[class*="_regen"] button span[data-testid="stIconMaterial"] {
-    color: var(--vyom-fg) !important;
-    opacity: 0.95 !important;
+html[data-vyom-theme] div[class*="_regen"] button span[data-testid="stIconMaterial"],
+html[data-vyom-theme] [data-testid="stPopover"] button span[data-testid="stIconMaterial"] {
+    color: var(--vyom-dim) !important;
+    font-size: 16px !important;
+    opacity: 1 !important;
 }
 
-html[data-vyom-theme="light"] div[class*="_actions"] button span[data-testid="stIconMaterial"],
-html[data-vyom-theme="light"] div[class*="_regen"] button span[data-testid="stIconMaterial"] {
-    color: #263b58 !important;
+html[data-vyom-theme] div[class*="_actions"] button:hover span[data-testid="stIconMaterial"],
+html[data-vyom-theme] div[class*="_regen"] button:hover span[data-testid="stIconMaterial"],
+html[data-vyom-theme] [data-testid="stPopover"] button:hover span[data-testid="stIconMaterial"],
+html[data-vyom-theme] div[class*="_like"] button[data-testid="stBaseButton-primary"] span[data-testid="stIconMaterial"],
+html[data-vyom-theme] div[class*="_dislike"] button[data-testid="stBaseButton-primary"] span[data-testid="stIconMaterial"] {
+    color: var(--vyom-strong) !important;
 }
 
 /* ============================================================
