@@ -712,7 +712,8 @@ def _copy_icon_html(key_prefix: str, report: str) -> str:
 
         style="display:flex;align-items:center;justify-content:center;width:38px;height:38px;
 
-        background:transparent;border:0;color:var(--vyom-dim);cursor:pointer;padding:0;"></button>
+        background:var(--vyom-panel);border:1px solid var(--vyom-border);color:var(--vyom-fg);
+        border-radius:9px;cursor:pointer;padding:0 9px;min-width:38px;gap:5px;"></button>
 
     <script>
 

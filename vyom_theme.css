@@ -17,3 +17,145 @@ html[data-vyom-theme="light"] .st-key-app_title h1{background:linear-gradient(10
 .vyom-copy-label{font:500 12px/1.2 system-ui,sans-serif;margin-left:6px}
 [data-testid="stSelectbox"] label{color:var(--vyom-dim)!important}[data-baseweb="select"]>div{background:var(--vyom-panel)!important;border-color:var(--vyom-border)!important;color:var(--vyom-fg)!important}
 @media(max-width:640px){[data-testid="stMainBlockContainer"],section.main>div{padding-left:.65rem!important;padding-right:.65rem!important}div[class*="st-key-user_msg_"] [data-testid="stElementContainer"]{max-width:92%!important}[data-testid="stChatInput"] textarea{font-size:16px!important}}
+
+
+/* VYOM contrast repair — explicit colours for both themes */
+html[data-vyom-theme="dark"] {
+  --vyom-fg:#eef0ff; --vyom-strong:#fff; --vyom-dim:#b9c2df;
+  --vyom-soft:rgba(153,169,255,.12); --vyom-border:rgba(177,194,255,.34);
+  --vyom-panel:rgba(12,16,42,.88); --vyom-hl:rgba(93,143,255,.24);
+}
+html[data-vyom-theme="light"] {
+  --vyom-fg:#17243b; --vyom-strong:#101c32; --vyom-dim:#53647c;
+  --vyom-soft:rgba(255,255,255,.82); --vyom-border:rgba(58,105,153,.34);
+  --vyom-panel:rgba(255,255,255,.90); --vyom-hl:rgba(71,139,207,.18);
+}
+
+/* Preserve user message bubbles. */
+html[data-vyom-theme] div[class*="st-key-user_msg_"] [data-testid="stElementContainer"] {
+  background:var(--vyom-soft)!important; border:1px solid var(--vyom-border)!important;
+  color:var(--vyom-fg)!important; box-shadow:0 3px 14px rgba(30,70,120,.06);
+}
+
+/* Response text, headings, bullets and dividers. */
+html[data-vyom-theme] [data-testid="stMarkdownContainer"],
+html[data-vyom-theme] [data-testid="stMarkdownContainer"] p,
+html[data-vyom-theme] [data-testid="stMarkdownContainer"] li,
+html[data-vyom-theme] [data-testid="stMarkdownContainer"] h1,
+html[data-vyom-theme] [data-testid="stMarkdownContainer"] h2,
+html[data-vyom-theme] [data-testid="stMarkdownContainer"] h3,
+html[data-vyom-theme] [data-testid="stMarkdownContainer"] h4,
+html[data-vyom-theme] [data-testid="stMarkdownContainer"] h5,
+html[data-vyom-theme] [data-testid="stMarkdownContainer"] h6,
+html[data-vyom-theme] [data-testid="stMarkdownContainer"] blockquote,
+html[data-vyom-theme] [data-testid="stMarkdownContainer"] td,
+html[data-vyom-theme] [data-testid="stMarkdownContainer"] th {
+  color:var(--vyom-fg)!important;
+}
+html[data-vyom-theme] [data-testid="stMarkdownContainer"] h1,
+html[data-vyom-theme] [data-testid="stMarkdownContainer"] h2,
+html[data-vyom-theme] [data-testid="stMarkdownContainer"] h3,
+html[data-vyom-theme] [data-testid="stMarkdownContainer"] h4 { color:var(--vyom-strong)!important; }
+html[data-vyom-theme] [data-testid="stMarkdownContainer"] h2 { border-bottom:1px solid var(--vyom-border)!important; }
+html[data-vyom-theme] [data-testid="stMarkdownContainer"] li::marker { color:var(--vyom-accent-2)!important; }
+html[data-vyom-theme] [data-testid="stMarkdownContainer"] hr { border-color:var(--vyom-border)!important; }
+html[data-vyom-theme] [data-testid="stMarkdownContainer"] strong {
+  color:var(--vyom-strong)!important; background:var(--vyom-hl)!important;
+}
+
+/* Like, dislike, regenerate and share actions. */
+html[data-vyom-theme] div[class*="_actions"] button,
+html[data-vyom-theme] div[class*="_regen"] button,
+html[data-vyom-theme] [data-testid="stPopover"] button {
+  color:var(--vyom-fg)!important; border-color:var(--vyom-border)!important;
+}
+html[data-vyom-theme] div[class*="_actions"] button span[data-testid="stIconMaterial"],
+html[data-vyom-theme] div[class*="_regen"] button span[data-testid="stIconMaterial"] {
+  color:var(--vyom-fg)!important; opacity:.95!important;
+}
+html[data-vyom-theme] div[class*="_actions"] button:hover,
+html[data-vyom-theme] div[class*="_regen"] button:hover {
+  background:var(--vyom-soft)!important; border-color:var(--vyom-accent-2)!important;
+}
+html[data-vyom-theme="light"] div[class*="_actions"] button span[data-testid="stIconMaterial"],
+html[data-vyom-theme="light"] div[class*="_regen"] button span[data-testid="stIconMaterial"] { color:#263b58!important; }
+
+/* Copy button contrast. */
+html[data-vyom-theme] .vyom-copy-label { color:var(--vyom-fg)!important; }
+html[data-vyom-theme="dark"] button[id^="copy-reply-"] {
+  color:#f3f5ff!important; border:1px solid rgba(190,203,255,.42)!important;
+  background:rgba(19,25,58,.92)!important;
+}
+html[data-vyom-theme="light"] button[id^="copy-reply-"] {
+  color:#203653!important; border:1px solid rgba(55,105,157,.42)!important;
+  background:rgba(255,255,255,.94)!important;
+}
+
+/* Clearly visible search/chat composer outline. */
+html[data-vyom-theme] div[data-testid="stChatInput"]>div {
+  border:1.5px solid var(--vyom-border)!important; background:var(--vyom-panel)!important;
+  box-shadow:0 5px 24px rgba(40,80,130,.10),inset 0 1px rgba(255,255,255,.18)!important;
+}
+html[data-vyom-theme="light"] div[data-testid="stChatInput"]>div { border-color:rgba(45,104,160,.48)!important; }
+html[data-vyom-theme="dark"] div[data-testid="stChatInput"]>div { border-color:rgba(158,181,255,.42)!important; }
+html[data-vyom-theme] div[data-testid="stChatInput"]>div:focus-within {
+  border-color:var(--vyom-accent-2)!important;
+  box-shadow:0 0 0 2px color-mix(in srgb,var(--vyom-accent-2) 22%,transparent),0 5px 24px rgba(40,80,130,.12)!important;
+}
+
+/* Popovers, expanders and sidebar surfaces. */
+html[data-vyom-theme] [data-testid="stPopoverBody"],
+html[data-vyom-theme] [data-baseweb="popover"]>div,
+html[data-vyom-theme] [data-testid="stExpander"] details,
+html[data-vyom-theme] [data-testid="stSidebar"]>div {
+  color:var(--vyom-fg)!important; border-color:var(--vyom-border)!important;
+}
+html[data-vyom-theme="light"] button[data-testid^="stBaseButton"] { color:#203653!important; }
+html[data-vyom-theme="light"] button[data-testid^="stBaseButton"] span[data-testid="stIconMaterial"] { color:#203653!important; }
+
+/* ============================================================
+   VYOM bottom composer / search area theme coverage
+   Covers the complete fixed bottom region, not only the input.
+   ============================================================ */
+html[data-vyom-theme] [data-testid="stBottom"],
+html[data-vyom-theme] [data-testid="stBottom"] > div,
+html[data-vyom-theme] [data-testid="stBottomBlockContainer"],
+html[data-vyom-theme] .stChatFloatingInputContainer,
+html[data-vyom-theme] [data-testid="stChatInput"] {
+  background: var(--vyom-bg) !important;
+  color: var(--vyom-fg) !important;
+  border-color: var(--vyom-border) !important;
+}
+
+/* Keep the app's theme visible through the bottom strip while avoiding
+   the default opaque Streamlit footer/background. */
+html[data-vyom-theme] [data-testid="stBottom"] {
+  background: color-mix(in srgb, var(--vyom-bg) 88%, transparent) !important;
+  backdrop-filter: blur(18px) !important;
+  -webkit-backdrop-filter: blur(18px) !important;
+}
+html[data-vyom-theme] [data-testid="stBottom"]::before,
+html[data-vyom-theme] .stChatFloatingInputContainer::before {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+html[data-vyom-theme] [data-testid="stBottomBlockContainer"] {
+  background: transparent !important;
+}
+html[data-vyom-theme] [data-testid="stChatInput"] > div {
+  background: var(--vyom-panel) !important;
+  border: 1.5px solid var(--vyom-border) !important;
+  color: var(--vyom-fg) !important;
+}
+html[data-vyom-theme] [data-testid="stChatInput"] textarea,
+html[data-vyom-theme] [data-testid="stChatInput"] button,
+html[data-vyom-theme] [data-testid="stChatInput"] [data-testid="stIconMaterial"] {
+  color: var(--vyom-fg) !important;
+}
+html[data-vyom-theme="light"] [data-testid="stBottom"] {
+  background: rgba(246, 250, 255, .90) !important;
+}
+html[data-vyom-theme="dark"] [data-testid="stBottom"] {
+  background: rgba(7, 8, 23, .90) !important;
+}
