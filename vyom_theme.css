@@ -88,7 +88,6 @@ body,
     color: var(--vyom-fg) !important;
 }
 
-/* Main background layering with customized properties */
 .stApp {
     background-color: var(--vyom-bg) !important;
     background-size: cover !important;
@@ -98,14 +97,12 @@ body,
     transition: background 0.3s ease-in-out !important;
 }
 
-/* 1. Dark theme configuration */
 html[data-vyom-theme="dark"] .stApp {
     background-image:
         linear-gradient(rgba(8, 10, 19, 0.2), rgba(8, 10, 19, 0.25)),
         url("app/static/dark_bg.jpg") !important;
 }
 
-/* 2. Light theme configuration */
 html[data-vyom-theme="light"] .stApp {
     background-image:
         linear-gradient(rgba(243, 246, 251, 0.1), rgba(243, 246, 251, 0.1)),
@@ -133,36 +130,11 @@ html[data-vyom-theme="light"] .stApp {
     color: var(--vyom-fg) !important;
 }
 
-[data-testid="stMarkdownContainer"] h1,
-[data-testid="stMarkdownContainer"] h2,
-[data-testid="stMarkdownContainer"] h3,
-[data-testid="stMarkdownContainer"] h4 {
-    color: var(--vyom-strong) !important;
-    font-weight: 650 !important;
-}
-
-[data-testid="stMarkdownContainer"] h2 {
-    padding-bottom: 0.35rem;
-    border-bottom: 1px solid var(--vyom-border) !important;
-}
-
 [data-testid="stMarkdownContainer"] strong {
     color: var(--vyom-strong) !important;
     background: var(--vyom-hl) !important;
     border-radius: 3px;
     padding: 0 2px;
-}
-
-[data-testid="stMarkdownContainer"] li::marker {
-    color: var(--vyom-accent-2) !important;
-}
-
-[data-testid="stMarkdownContainer"] hr {
-    border-color: var(--vyom-border) !important;
-}
-
-[data-testid="stMarkdownContainer"] a {
-    color: var(--vyom-accent-2) !important;
 }
 
 /* ============================================================
@@ -177,45 +149,9 @@ html[data-vyom-theme] div[class*="st-key-user_msg_"] [data-testid="stElementCont
     box-shadow: 0 3px 14px var(--vyom-shadow) !important;
 }
 
-html[data-vyom-theme="dark"] div[class*="st-key-user_msg_"] [data-testid="stElementContainer"] {
-    background: #202a3e !important;
-}
-
-html[data-vyom-theme="light"] div[class*="st-key-user_msg_"] [data-testid="stElementContainer"] {
-    background: #e5edf8 !important;
-}
-
 /* ============================================================
    CHAT COMPOSER AND BOTTOM AREA
    ============================================================ */
-
-html[data-vyom-theme] [data-testid="stBottom"],
-html[data-vyom-theme] [data-testid="stBottom"] > div,
-html[data-vyom-theme] [data-testid="stBottomBlockContainer"],
-html[data-vyom-theme] .stChatFloatingInputContainer {
-    background: transparent !important;
-    color: var(--vyom-fg) !important;
-    border-color: transparent !important;
-}
-
-html[data-vyom-theme] [data-testid="stBottom"] {
-    background: linear-gradient(transparent, var(--vyom-bg) 60%) !important;
-}
-
-html[data-vyom-theme] [data-testid="stBottom"]::before,
-html[data-vyom-theme] .stChatFloatingInputContainer::before {
-    background: transparent !important;
-    border: 0 !important;
-    box-shadow: none !important;
-}
-
-html[data-vyom-theme] [data-testid="stBottomBlockContainer"] {
-    background: transparent !important;
-}
-
-html[data-vyom-theme] [data-testid="stChatInput"] {
-    background: transparent !important;
-}
 
 html[data-vyom-theme] [data-testid="stChatInput"] > div {
     background: var(--vyom-panel) !important;
@@ -236,52 +172,34 @@ html[data-vyom-theme] [data-testid="stChatInput"] textarea {
     caret-color: var(--vyom-accent-2) !important;
 }
 
-html[data-vyom-theme] [data-testid="stChatInput"] textarea::placeholder {
-    color: var(--vyom-dim) !important;
-    opacity: 0.85 !important;
-}
-
-html[data-vyom-theme] [data-testid="stChatInput"] button {
-    color: var(--vyom-fg) !important;
-}
-
 /* ============================================================
-   EXPANDERS — INCLUDING THINKING
+   THINKING EXPANDER — MERGED / UNBORDERED
    ============================================================ */
 
 html[data-vyom-theme] [data-testid="stExpander"] {
-    background: var(--vyom-panel) !important;
-    border: 1px solid var(--vyom-border) !important;
-    border-radius: 12px !important;
-    overflow: hidden !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
 }
 
 html[data-vyom-theme] [data-testid="stExpander"] details,
 html[data-vyom-theme] [data-testid="stExpander"] summary,
 html[data-vyom-theme] [data-testid="stExpander"] [data-testid="stExpanderDetails"] {
     background: transparent !important;
-    border: 0 !important;
-    color: var(--vyom-fg) !important;
+    border: none !important;
+    color: var(--vyom-dim) !important;
+    padding-left: 0 !important;
 }
 
 html[data-vyom-theme] [data-testid="stExpander"] summary:hover {
-    background: var(--vyom-panel-hover) !important;
-}
-
-html[data-vyom-theme] [data-testid="stExpander"] summary p,
-html[data-vyom-theme] [data-testid="stExpander"] summary span,
-html[data-vyom-theme] [data-testid="stExpander"] summary svg {
-    color: var(--vyom-fg) !important;
-    fill: var(--vyom-fg) !important;
+    background: transparent !important;
+    color: var(--vyom-strong) !important;
 }
 
 /* ============================================================
-   SIDEBAR, POPOVERS AND SELECT MENUS
+   SIDEBAR & POPOVERS
    ============================================================ */
-
-html[data-vyom-theme] [data-testid="stSidebar"] {
-    background: transparent !important;
-}
 
 html[data-vyom-theme] [data-testid="stSidebar"] > div {
     background: var(--vyom-panel) !important;
@@ -295,74 +213,12 @@ html[data-vyom-theme] [data-baseweb="popover"] > div {
     border: 1px solid var(--vyom-border) !important;
 }
 
-html[data-vyom-theme] [data-testid="stSelectbox"] label {
-    color: var(--vyom-dim) !important;
-}
-
-html[data-vyom-theme] [data-baseweb="select"] > div {
-    background: var(--vyom-panel) !important;
-    border-color: var(--vyom-border) !important;
-    color: var(--vyom-fg) !important;
-}
-
 /* ============================================================
-   BUTTONS
+   SMALL CIRCULAR LIKE & DISLIKE BUTTONS ONLY (EXCLUDING PDF/SHARE/REGEN)
    ============================================================ */
 
-html[data-vyom-theme] .stApp button {
-    color: var(--vyom-fg);
-    border-color: var(--vyom-border);
-}
-
-html[data-vyom-theme] .stApp button:hover {
-    border-color: var(--vyom-accent-2) !important;
-}
-
-html[data-vyom-theme] .stApp button[data-testid="stBaseButton-primary"] {
-    background: var(--vyom-accent) !important;
-    color: #ffffff !important;
-    border: 0 !important;
-}
-
-html[data-vyom-theme] .stApp button[data-testid="stBaseButton-primary"]:hover {
-    filter: brightness(1.08);
-}
-
-/* ============================================================
-   COPY BUTTON
-   ============================================================ */
-
-html[data-vyom-theme] .vyom-copy-label {
-    color: var(--vyom-fg) !important;
-    font: 500 12px/1.2 system-ui, sans-serif !important;
-    margin-left: 6px;
-}
-
-html[data-vyom-theme="dark"] button[id^="copy-reply-"] {
-    color: #f3f5ff !important;
-    border: 1px solid rgba(190, 203, 255, 0.42) !important;
-    background: #171e32 !important;
-}
-
-html[data-vyom-theme="light"] button[id^="copy-reply-"] {
-    color: #203653 !important;
-    border: 1px solid rgba(55, 105, 157, 0.42) !important;
-    background: #ffffff !important;
-}
-
-html[data-vyom-theme] button[id^="copy-reply-"]:hover {
-    border-color: var(--vyom-accent-2) !important;
-}
-
-/* ============================================================
-   SMALL CIRCULAR LIKE, DISLIKE & ACTION BUTTONS
-   ============================================================ */
-
-html[data-vyom-theme] div[class*="_actions"] [data-testid="stButton"],
-html[data-vyom-theme] div[class*="_regen"] [data-testid="stButton"],
 html[data-vyom-theme] div[class*="_like"] [data-testid="stButton"],
-html[data-vyom-theme] div[class*="_dislike"] [data-testid="stButton"],
-html[data-vyom-theme] [data-testid="stPopover"] [data-testid="stButton"] {
+html[data-vyom-theme] div[class*="_dislike"] [data-testid="stButton"] {
     width: 32px !important;
     height: 32px !important;
     min-width: 32px !important;
@@ -372,11 +228,8 @@ html[data-vyom-theme] [data-testid="stPopover"] [data-testid="stButton"] {
     margin: 0 !important;
 }
 
-html[data-vyom-theme] div[class*="_actions"] button,
-html[data-vyom-theme] div[class*="_regen"] button,
 html[data-vyom-theme] div[class*="_like"] button,
-html[data-vyom-theme] div[class*="_dislike"] button,
-html[data-vyom-theme] [data-testid="stPopover"] button {
+html[data-vyom-theme] div[class*="_dislike"] button {
     width: 32px !important;
     height: 32px !important;
     min-width: 32px !important;
@@ -388,133 +241,39 @@ html[data-vyom-theme] [data-testid="stPopover"] button {
     background: transparent !important;
     border: 1px solid transparent !important;
     color: var(--vyom-dim) !important;
-    box-shadow: none !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
-    transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.1s ease !important;
+    transition: background 0.2s ease, border-color 0.2s ease, transform 0.1s ease !important;
 }
 
-html[data-vyom-theme] div[class*="_actions"] button:hover,
-html[data-vyom-theme] div[class*="_regen"] button:hover,
 html[data-vyom-theme] div[class*="_like"] button:hover,
-html[data-vyom-theme] div[class*="_dislike"] button:hover,
-html[data-vyom-theme] [data-testid="stPopover"] button:hover {
+html[data-vyom-theme] div[class*="_dislike"] button:hover {
     background: var(--vyom-soft) !important;
     border-color: var(--vyom-border) !important;
     color: var(--vyom-strong) !important;
 }
 
-html[data-vyom-theme] div[class*="_actions"] button:active,
-html[data-vyom-theme] div[class*="_regen"] button:active,
 html[data-vyom-theme] div[class*="_like"] button:active,
-html[data-vyom-theme] div[class*="_dislike"] button:active,
-html[data-vyom-theme] [data-testid="stPopover"] button:active {
+html[data-vyom-theme] div[class*="_dislike"] button:active {
     transform: scale(0.90) !important;
 }
 
 html[data-vyom-theme] div[class*="_like"] button[data-testid="stBaseButton-primary"],
 html[data-vyom-theme] div[class*="_dislike"] button[data-testid="stBaseButton-primary"] {
-    width: 32px !important;
-    height: 32px !important;
-    min-width: 32px !important;
-    max-width: 32px !important;
-    min-height: 32px !important;
-    max-height: 32px !important;
-    padding: 0 !important;
-    border-radius: 50% !important;
     background: var(--vyom-hl) !important;
     border: 1px solid var(--vyom-accent-2) !important;
     color: var(--vyom-strong) !important;
     box-shadow: 0 0 10px var(--vyom-hl) !important;
-    filter: none !important;
-}
-
-html[data-vyom-theme] div[class*="_actions"] button span[data-testid="stIconMaterial"],
-html[data-vyom-theme] div[class*="_regen"] button span[data-testid="stIconMaterial"],
-html[data-vyom-theme] div[class*="_like"] button span[data-testid="stIconMaterial"],
-html[data-vyom-theme] div[class*="_dislike"] button span[data-testid="stIconMaterial"],
-html[data-vyom-theme] [data-testid="stPopover"] button span[data-testid="stIconMaterial"] {
-    color: inherit !important;
-    font-size: 16px !important;
-    opacity: 1 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    line-height: 1 !important;
 }
 
 /* ============================================================
-   APP TITLE
+   APP TITLE GRADIENT
    ============================================================ */
 
 .st-key-app_title h1 {
-    background: linear-gradient(
-        100deg,
-        #e77abf,
-        #9b83e8 55%,
-        #53b9d4
-    );
+    background: linear-gradient(100deg, #e77abf, #9b83e8 55%, #53b9d4);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent !important;
-}
-
-html[data-vyom-theme="light"] .st-key-app_title h1 {
-    background: linear-gradient(
-        100deg,
-        #c64b9d,
-        #7568c9 55%,
-        #258eae
-    );
-    -webkit-background-clip: text;
-    background-clip: text;
-}
-
-/* ============================================================
-   CODE BLOCKS
-   ============================================================ */
-
-html[data-vyom-theme] [data-testid="stCodeBlock"] {
-    border: 1px solid var(--vyom-border) !important;
-    border-radius: 10px !important;
-}
-
-html[data-vyom-theme] pre {
-    border-color: var(--vyom-border) !important;
-}
-
-/* ============================================================
-   MOBILE LAYOUT
-   ============================================================ */
-
-@media (max-width: 640px) {
-    [data-testid="stMainBlockContainer"],
-    section.main > div {
-        padding-left: 0.65rem !important;
-        padding-right: 0.65rem !important;
-    }
-
-    div[class*="st-key-user_msg_"] [data-testid="stElementContainer"] {
-        max-width: 92% !important;
-    }
-
-    [data-testid="stChatInput"] textarea {
-        font-size: 16px !important;
-    }
-}
-
-/* ============================================================
-   ACCESSIBILITY — REDUCE UNNECESSARY MOTION
-   ============================================================ */
-
-@media (prefers-reduced-motion: reduce) {
-    *,
-    *::before,
-    *::after {
-        scroll-behavior: auto !important;
-        animation-duration: 0.01ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 0.01ms !important;
-    }
 }
