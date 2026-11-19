@@ -99,13 +99,13 @@ body,
 
 html[data-vyom-theme="dark"] .stApp {
     background-image:
-        linear-gradient(rgba(8, 10, 19, 0.2), rgba(8, 10, 19, 0.25)),
+        linear-gradient(rgba(8, 10, 19, 0.4), rgba(8, 10, 19, 0.4)),
         url("app/static/dark_bg.jpg") !important;
 }
 
 html[data-vyom-theme="light"] .stApp {
     background-image:
-        linear-gradient(rgba(243, 246, 251, 0.1), rgba(243, 246, 251, 0.1)),
+        linear-gradient(rgba(243, 246, 251, 0.4), rgba(243, 246, 251, 0.4)),
         url("app/static/light_bg.jpg") !important;
 }
 
@@ -173,22 +173,19 @@ html[data-vyom-theme] [data-testid="stChatInput"] textarea {
 }
 
 /* ============================================================
-   THINKING EXPANDER — MERGED / UNBORDERED
+   THINKING EXPANDER — 100% MERGED / TRANSPARENT
    ============================================================ */
 
-html[data-vyom-theme] [data-testid="stExpander"] {
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    border-radius: 0 !important;
-}
-
+html[data-vyom-theme] [data-testid="stExpander"],
+html[data-vyom-theme] [data-testid="stExpander"] > div,
 html[data-vyom-theme] [data-testid="stExpander"] details,
 html[data-vyom-theme] [data-testid="stExpander"] summary,
 html[data-vyom-theme] [data-testid="stExpander"] [data-testid="stExpanderDetails"] {
     background: transparent !important;
+    background-color: transparent !important;
     border: none !important;
-    color: var(--vyom-dim) !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
     padding-left: 0 !important;
 }
 
@@ -214,11 +211,15 @@ html[data-vyom-theme] [data-baseweb="popover"] > div {
 }
 
 /* ============================================================
-   SMALL CIRCULAR LIKE & DISLIKE BUTTONS ONLY (EXCLUDING PDF/SHARE/REGEN)
+   STRICT CIRCULAR LIKE & DISLIKE BUTTONS ONLY
    ============================================================ */
 
+html[data-vyom-theme] div[class*="_like"],
+html[data-vyom-theme] div[class*="_dislike"],
 html[data-vyom-theme] div[class*="_like"] [data-testid="stButton"],
-html[data-vyom-theme] div[class*="_dislike"] [data-testid="stButton"] {
+html[data-vyom-theme] div[class*="_dislike"] [data-testid="stButton"],
+html[data-vyom-theme] div[class*="_like"] > div,
+html[data-vyom-theme] div[class*="_dislike"] > div {
     width: 32px !important;
     height: 32px !important;
     min-width: 32px !important;
@@ -226,6 +227,10 @@ html[data-vyom-theme] div[class*="_dislike"] [data-testid="stButton"] {
     min-height: 32px !important;
     max-height: 32px !important;
     margin: 0 !important;
+    padding: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
 }
 
 html[data-vyom-theme] div[class*="_like"] button,
@@ -244,6 +249,7 @@ html[data-vyom-theme] div[class*="_dislike"] button {
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
+    box-shadow: none !important;
     transition: background 0.2s ease, border-color 0.2s ease, transform 0.1s ease !important;
 }
 
@@ -264,6 +270,7 @@ html[data-vyom-theme] div[class*="_dislike"] button[data-testid="stBaseButton-pr
     background: var(--vyom-hl) !important;
     border: 1px solid var(--vyom-accent-2) !important;
     color: var(--vyom-strong) !important;
+    border-radius: 50% !important;
     box-shadow: 0 0 10px var(--vyom-hl) !important;
 }
 
