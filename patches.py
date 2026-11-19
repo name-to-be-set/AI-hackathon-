@@ -1,4 +1,3 @@
-
 """
 VYOM patches
 -------------
@@ -45,86 +44,49 @@ if FORMAT_RULES not in agent.BASE_SYSTEM_PROMPT:
 # 2. IMAGE REQUEST DETECTION
 # ============================================================
 
-_IMAGE_REQUEST = re.compile(
-    r"^(?:"
-    r"please\s+|pls\s+|"
-    r"can\s+you\s+|could\s+you\s+|would\s+you\s+|"
-    r"i\s+want\s+you\s+to\s+|"
-    r"help\s+me\s+|"
-    r"now\s+|"
-    r")*"
-    r"(?:"
-    r"draw\b|paint\b|sketch\b|"
-    r"illustrate\b|"
-    r"generate\b|create\b|make\b|produce\b|design\b|render\b"
-    r")",
+_VISUAL_NOUN = re.compile(
+    r"\b(?:"
+    r"image|images|picture|pictures|pic|pics|photo|photos|"
+    r"photograph|photographs|illustration|illustrations|drawing|drawings|"
+    r"artwork|painting|paintings|wallpaper|logo|poster|banner|icon|thumbnail"
+    r")\b",
     re.IGNORECASE,
 )
 
-_IMAGE_OBJECT = re.compile(
+_VISUAL_ACTION = re.compile(
     r"\b(?:"
-    r"image|images|picture|pictures|pic|"
-    r"illustration|illustrations|drawing|drawings|"
-    r"photo|photos|photograph|photographs|"
-    r"artwork|painting|paintings|wallpaper|"
-    r"logo|poster|banner|icon|thumbnail"
+    r"give|show|find|get|send|draw|paint|sketch|illustrate|"
+    r"generate|create|make|produce|design|render"
     r")\b",
     re.IGNORECASE,
 )
 
 _IMAGE_FOLLOWUP = re.compile(
-    r"^(?:"
-    r"now\s+)?"
-    r"(?:"
-    r"make|create|generate|draw|paint|"
-    r"another|one\s+more|"
-    r"try"
-    r")\b",
+    r"^(?:now\s+)?(?:make|create|generate|draw|paint|another|one\s+more|try)\b",
     re.IGNORECASE,
 )
 
 
 def _is_image_creation_request(topic: str) -> bool:
-    """
-    Recognise common image requests, including some short follow-ups.
-
-    Examples:
-        Generate an image of a futuristic city
-        Can you draw a cat?
-        Make me a logo
-        Design a poster
-        Draw another one
-    """
-
-    if not isinstance(topic, str):
+    """Recognize requests for images, pictures, photos, or drawings naturally."""
+    if not isinstance(topic, str) or not topic.strip():
         return False
 
     normalized = re.sub(r"\s+", " ", topic.strip())
 
-    if not normalized:
-        return False
-
-    if not _IMAGE_REQUEST.match(normalized):
-        return False
-
-    # Normal requests should contain an image-related object.
-    if _IMAGE_OBJECT.search(normalized):
+    if _VISUAL_NOUN.search(normalized) and _VISUAL_ACTION.search(normalized):
         return True
 
-    # Short follow-ups may refer to an image already discussed.
-    if _IMAGE_FOLLOWUP.match(normalized):
-        return bool(
-            re.search(
-                r"\b(?:another|one|more|again|same|different)\b",
-                normalized,
-                re.IGNORECASE,
-            )
-        )
+    if _IMAGE_FOLLOWUP.match(normalized) and re.search(
+        r"\b(?:another|one|more|again|same|different)\b",
+        normalized,
+        re.IGNORECASE,
+    ):
+        return True
 
-    # Drawing verbs can also be used without the word "image".
     if re.match(
         r"^(?:(?:please|pls|can you|could you|would you|"
-        r"i want you to|help me)\s+)*(?:draw|paint|sketch|illustrate)\b",
+        r"i want you to|help me|now)\s+)*(?:draw|paint|sketch|illustrate)\b",
         normalized,
         re.IGNORECASE,
     ):
@@ -133,7 +95,6 @@ def _is_image_creation_request(topic: str) -> bool:
     return False
 
 
-# Override the original function in agent.py.
 agent._is_image_creation_request = _is_image_creation_request
 
 
@@ -141,7 +102,7 @@ agent._is_image_creation_request = _is_image_creation_request
 # 3. IMAGE PROVIDER CONFIGURATION
 # ============================================================
 
-IMAGE_TIMEOUT = 45
+IMAGE_TIMEOUT = 25
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (VYOM image generator)"
@@ -160,7 +121,6 @@ DEFAULT_IMAGE_PROVIDERS = (
 
 def _result(content: bytes, mime_type: str) -> dict[str, str]:
     """Convert image bytes into the format expected by app.py."""
-
     if not content:
         raise ValueError("The image provider returned empty data.")
 
@@ -176,7 +136,6 @@ def _result(content: bytes, mime_type: str) -> dict[str, str]:
 
 def _validate_response(response: requests.Response) -> str:
     """Check whether a provider actually returned image data."""
-
     response.raise_for_status()
 
     mime_type = (
@@ -206,13 +165,12 @@ def _from_pollinations(prompt: str) -> dict[str, str]:
         raise ValueError("Image prompt is empty.")
 
     encoded_prompt = quote(prompt[:900], safe="")
-
     seed = random.randint(1, 10**6)
 
     url = (
         "https://image.pollinations.ai/prompt/"
         + encoded_prompt
-        + f"?width=1024&height=1024"
+        + "?width=1024&height=1024"
         + f"&nologo=true&model=flux&seed={seed}"
     )
 
@@ -223,7 +181,6 @@ def _from_pollinations(prompt: str) -> dict[str, str]:
     )
 
     mime_type = _validate_response(response)
-
     return _result(response.content, mime_type)
 
 
@@ -233,7 +190,6 @@ def _from_pollinations(prompt: str) -> dict[str, str]:
 
 def _from_huggingface(prompt: str) -> dict[str, str]:
     token = os.getenv("HF_TOKEN", "").strip()
-
     if not token:
         raise ValueError("HF_TOKEN is not configured.")
 
@@ -253,7 +209,6 @@ def _from_huggingface(prompt: str) -> dict[str, str]:
     )
 
     mime_type = _validate_response(response)
-
     return _result(response.content, mime_type)
 
 
@@ -263,7 +218,6 @@ def _from_huggingface(prompt: str) -> dict[str, str]:
 
 def _from_gemini(prompt: str) -> dict[str, str]:
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
-
     if not api_key:
         raise ValueError("GEMINI_API_KEY is not configured.")
 
@@ -286,9 +240,7 @@ def _from_gemini(prompt: str) -> dict[str, str]:
     )
 
     response.raise_for_status()
-
     payload = response.json()
-
     candidates = payload.get("candidates") or []
 
     if not candidates:
@@ -310,7 +262,6 @@ def _from_gemini(prompt: str) -> dict[str, str]:
             continue
 
         encoded = image_data.get("data")
-
         if not isinstance(encoded, str) or not encoded:
             continue
 
@@ -320,7 +271,6 @@ def _from_gemini(prompt: str) -> dict[str, str]:
             or "image/png"
         )
 
-        # Ensure the returned data is valid Base64.
         try:
             decoded = base64.b64decode(encoded, validate=True)
         except (ValueError, TypeError):
@@ -343,13 +293,6 @@ _PROVIDERS = {
 
 
 def _provider_order() -> list[str]:
-    """
-    Read provider order from environment.
-
-    Example:
-        IMAGE_PROVIDERS=pollinations,huggingface,gemini
-    """
-
     configured = os.getenv(
         "IMAGE_PROVIDERS",
         ",".join(DEFAULT_IMAGE_PROVIDERS),
@@ -360,13 +303,10 @@ def _provider_order() -> list[str]:
 
     for item in configured.split(","):
         name = item.strip().lower()
-
         if name in _PROVIDERS and name not in seen:
             order.append(name)
             seen.add(name)
 
-    # If the environment variable is invalid or empty,
-    # use the default provider order.
     if not order:
         order = list(DEFAULT_IMAGE_PROVIDERS)
 
@@ -378,13 +318,7 @@ def _provider_order() -> list[str]:
 # ============================================================
 
 def _generate_image(prompt: str) -> dict[str, str]:
-    """
-    Try image providers in order.
-
-    A provider failure moves to the next provider.
-    The first valid generated image is returned.
-    """
-
+    """Try image providers in order and return the first valid image."""
     if not isinstance(prompt, str) or not prompt.strip():
         raise RuntimeError("Cannot generate an image from an empty prompt.")
 
@@ -396,17 +330,13 @@ def _generate_image(prompt: str) -> dict[str, str]:
         try:
             result = provider(prompt.strip())
 
-            if not isinstance(result, dict):
-                raise ValueError("Provider returned an invalid result.")
-
-            if not result.get("base64"):
+            if not isinstance(result, dict) or not result.get("base64"):
                 raise ValueError("Provider returned no image data.")
 
             agent.LOGGER.info(
                 "Image successfully generated using %s.",
                 provider_name,
             )
-
             return result
 
         except (
@@ -416,13 +346,11 @@ def _generate_image(prompt: str) -> dict[str, str]:
             IndexError,
             TypeError,
         ) as error:
-
             agent.LOGGER.warning(
                 "Image provider %s failed: %s",
                 provider_name,
                 error,
             )
-
             failures.append(provider_name)
 
     agent.LOGGER.error(
@@ -435,5 +363,4 @@ def _generate_image(prompt: str) -> dict[str, str]:
     )
 
 
-# Override the original image generator in agent.py.
 agent._generate_image = _generate_image
