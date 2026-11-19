@@ -3,10 +3,10 @@
 agent.py does not need to change: this module imports its helpers.
 """
 import base64
-import logging
-import os
 from collections.abc import Callable
 from io import BytesIO
+import logging
+import os
 from typing import Iterator
 
 from openai import OpenAIError
@@ -69,13 +69,15 @@ def _describe_images(images: list[tuple[str, bytes, str]], question: str) -> str
     targets = _vision_targets()
     if not targets:
         raise RuntimeError("Reading images needs GEMINI_API_KEY to be set.")
+
+    prompt_question = question.strip() or "Summarize and describe what is shown."
     content: list[dict] = [
         {
             "type": "text",
             "text": (
                 "Describe the attached image(s) in detail and transcribe any "
                 "visible text exactly. The user's question about them is: "
-                f"{question}"
+                f"{prompt_question}"
             ),
         }
     ]
@@ -84,14 +86,15 @@ def _describe_images(images: list[tuple[str, bytes, str]], question: str) -> str
         content.append(
             {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}}
         )
+
     failures: list[Exception] = []
     for target in targets:
         client = _client_for(target)
         try:
             response = _provider_request(
-                lambda: client.chat.completions.create(
-                    model=target.model,
-                    messages=[{"role": "user", "content": content}],
+                lambda c=client, m=target.model, msg=content: c.chat.completions.create(
+                    model=m,
+                    messages=[{"role": "user", "content": msg}],
                 )
             )
             text = _response_content(response).strip()
@@ -100,6 +103,7 @@ def _describe_images(images: list[tuple[str, bytes, str]], question: str) -> str
         except (OpenAIError, TimeoutError) as error:
             _note_failure(target, error)
             failures.append(error)
+
     raise RuntimeError(LLM_UNAVAILABLE_MESSAGE)
 
 
