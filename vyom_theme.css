@@ -353,16 +353,30 @@ html[data-vyom-theme="light"] button[id^="copy-reply-"] {
 html[data-vyom-theme] button[id^="copy-reply-"]:hover {
     border-color: var(--vyom-accent-2) !important;
 }
+
 /* ============================================================
    SMALL CIRCULAR LIKE, DISLIKE & ACTION BUTTONS
    ============================================================ */
 
-/* Base styling for all action, regen, and popover buttons */
+html[data-vyom-theme] div[class*="_actions"] [data-testid="stButton"],
+html[data-vyom-theme] div[class*="_regen"] [data-testid="stButton"],
+html[data-vyom-theme] div[class*="_like"] [data-testid="stButton"],
+html[data-vyom-theme] div[class*="_dislike"] [data-testid="stButton"],
+html[data-vyom-theme] [data-testid="stPopover"] [data-testid="stButton"] {
+    width: 32px !important;
+    height: 32px !important;
+    min-width: 32px !important;
+    max-width: 32px !important;
+    min-height: 32px !important;
+    max-height: 32px !important;
+    margin: 0 !important;
+}
+
 html[data-vyom-theme] div[class*="_actions"] button,
 html[data-vyom-theme] div[class*="_regen"] button,
-html[data-vyom-theme] [data-testid="stPopover"] button,
 html[data-vyom-theme] div[class*="_like"] button,
-html[data-vyom-theme] div[class*="_dislike"] button {
+html[data-vyom-theme] div[class*="_dislike"] button,
+html[data-vyom-theme] [data-testid="stPopover"] button {
     width: 32px !important;
     height: 32px !important;
     min-width: 32px !important;
@@ -375,33 +389,30 @@ html[data-vyom-theme] div[class*="_dislike"] button {
     border: 1px solid transparent !important;
     color: var(--vyom-dim) !important;
     box-shadow: none !important;
-    display: inline-flex !important;
+    display: flex !important;
     align-items: center !important;
     justify-content: center !important;
     transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.1s ease !important;
 }
 
-/* Hover state */
 html[data-vyom-theme] div[class*="_actions"] button:hover,
 html[data-vyom-theme] div[class*="_regen"] button:hover,
-html[data-vyom-theme] [data-testid="stPopover"] button:hover,
 html[data-vyom-theme] div[class*="_like"] button:hover,
-html[data-vyom-theme] div[class*="_dislike"] button:hover {
+html[data-vyom-theme] div[class*="_dislike"] button:hover,
+html[data-vyom-theme] [data-testid="stPopover"] button:hover {
     background: var(--vyom-soft) !important;
     border-color: var(--vyom-border) !important;
     color: var(--vyom-strong) !important;
 }
 
-/* Active / Clicked state for smooth feedback feel */
 html[data-vyom-theme] div[class*="_actions"] button:active,
 html[data-vyom-theme] div[class*="_regen"] button:active,
-html[data-vyom-theme] [data-testid="stPopover"] button:active,
 html[data-vyom-theme] div[class*="_like"] button:active,
-html[data-vyom-theme] div[class*="_dislike"] button:active {
-    transform: scale(0.92) !important;
+html[data-vyom-theme] div[class*="_dislike"] button:active,
+html[data-vyom-theme] [data-testid="stPopover"] button:active {
+    transform: scale(0.90) !important;
 }
 
-/* Active/Selected Primary state when liked or disliked */
 html[data-vyom-theme] div[class*="_like"] button[data-testid="stBaseButton-primary"],
 html[data-vyom-theme] div[class*="_dislike"] button[data-testid="stBaseButton-primary"] {
     width: 32px !important;
@@ -419,18 +430,18 @@ html[data-vyom-theme] div[class*="_dislike"] button[data-testid="stBaseButton-pr
     filter: none !important;
 }
 
-/* Icon alignment inside the buttons */
 html[data-vyom-theme] div[class*="_actions"] button span[data-testid="stIconMaterial"],
 html[data-vyom-theme] div[class*="_regen"] button span[data-testid="stIconMaterial"],
-html[data-vyom-theme] [data-testid="stPopover"] button span[data-testid="stIconMaterial"],
 html[data-vyom-theme] div[class*="_like"] button span[data-testid="stIconMaterial"],
-html[data-vyom-theme] div[class*="_dislike"] button span[data-testid="stIconMaterial"] {
+html[data-vyom-theme] div[class*="_dislike"] button span[data-testid="stIconMaterial"],
+html[data-vyom-theme] [data-testid="stPopover"] button span[data-testid="stIconMaterial"] {
     color: inherit !important;
     font-size: 16px !important;
     opacity: 1 !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
+    line-height: 1 !important;
 }
 
 /* ============================================================
