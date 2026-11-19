@@ -1,4 +1,3 @@
-
 import base64
 import hmac
 import html
@@ -18,7 +17,7 @@ import streamlit as st
 from openai import OpenAIError
 from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.pagesizes import LETTER
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 from streamlit.errors import StreamlitAPIException, StreamlitSecretNotFoundError
@@ -30,9 +29,15 @@ import patches  # noqa: F401
 
 def _load_streamlit_secrets_into_environment():
     for name in (
-        "TAVILY_API_KEY", "GROQ_API_KEY", "GEMINI_API_KEY",
-        "BIFROST_BASE_URL", "BIFROST_API_KEY", "BIFROST_MODELS",
-        "GROQ_MODELS", "GEMINI_MODELS", "ADMIN_PASSWORD",
+        "TAVILY_API_KEY",
+        "GROQ_API_KEY",
+        "GEMINI_API_KEY",
+        "BIFROST_BASE_URL",
+        "BIFROST_API_KEY",
+        "BIFROST_MODELS",
+        "GROQ_MODELS",
+        "GEMINI_MODELS",
+        "ADMIN_PASSWORD",
     ):
         if os.getenv(name, "").strip():
             continue
@@ -79,6 +84,77 @@ TIME_GREETING_LINES = {
 }
 
 FILE_TYPES = ["pdf", "png", "jpg", "jpeg", "webp", "txt", "md", "csv"]
+
+
+# ---------------------------------------------------------------------------
+# Theme (Renderer-driven)
+# ---------------------------------------------------------------------------
+
+def _resolve_renderer_theme() -> str:
+    """Resolve theme strictly from the renderer ('Light', 'Dark', or 'System')."""
+    raw = (
+        st.query_params.get("theme")
+        or st.query_params.get("renderer_theme")
+        or ""
+    )
+    normalized = str(raw).strip().lower()
+    if normalized == "light":
+        return "Light"
+    if normalized == "dark":
+        return "Dark"
+    return "System"
+
+
+def _apply_renderer_theme_script(renderer_mode: str) -> str:
+    """Apply only the renderer's theme to the document without conflicting local overrides."""
+    mode_json = json.dumps(renderer_mode)
+    return f"""
+    <script>
+    (() => {{
+        const rendererMode = {mode_json};
+
+        const resolve = (mode) => {{
+            const external =
+                window.__VYOM_RENDERER_THEME__ ||
+                document.documentElement.dataset.rendererTheme ||
+                "";
+            const extNorm = String(external).trim().toLowerCase();
+            if (extNorm === "light" || extNorm === "dark") {{
+                return extNorm;
+            }}
+
+            const effective = (extNorm === "system") ? "System" : mode;
+            if (effective === "Light") return "light";
+            if (effective === "Dark") return "dark";
+
+            return window.matchMedia("(prefers-color-scheme: light)").matches
+                ? "light"
+                : "dark";
+        }};
+
+        const sync = () => {{
+            document.documentElement.dataset.vyomTheme = resolve(rendererMode);
+        }};
+
+        sync();
+
+        if (!window.__vyomRendererThemeBound) {{
+            window.__vyomRendererThemeBound = true;
+            const mq = window.matchMedia("(prefers-color-scheme: light)");
+            mq.addEventListener?.("change", sync);
+            window.addEventListener("message", (event) => {{
+                const data = event?.data;
+                if (!data || typeof data !== "object") return;
+                const candidate = String(data.theme || data.rendererTheme || "").toLowerCase();
+                if (candidate === "light" || candidate === "dark" || candidate === "system") {{
+                    window.__VYOM_RENDERER_THEME__ = candidate;
+                    sync();
+                }}
+            }});
+        }}
+    }})();
+    </script>
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +210,7 @@ def _render_admin_panel():
 # ---------------------------------------------------------------------------
 
 def _new_chat():
-    return {"id": uuid.uuid4().hex[:8], "title": "New chat", "messages": []}
+    return {"id": uuid.uuid4().hex, "title": "New chat", "messages": []}
 
 
 def _init_chats():
@@ -241,6 +317,14 @@ def _visible_report(report):
 # PDF generation
 # ---------------------------------------------------------------------------
 
+def _format_inline_pdf(text: str) -> str:
+    escaped = html.escape(text)
+    escaped = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escaped)
+    escaped = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<i>\1</i>", escaped)
+    escaped = re.sub(r"`([^`]+)`", r"<font name='Courier'>\1</font>", escaped)
+    return escaped
+
+
 def _build_pdf(report, sources):
     buffer = BytesIO()
     document = SimpleDocTemplate(
@@ -276,12 +360,12 @@ def _build_pdf(report, sources):
         heading = re.match(r"^(#{1,6})\s+(.+)$", stripped)
         if heading:
             style = styles["Heading1"] if len(heading.group(1)) < 3 else styles["Heading2"]
-            story.append(Paragraph(html.escape(heading.group(2)), style))
+            story.append(Paragraph(_format_inline_pdf(heading.group(2)), style))
             continue
 
         bullet = re.match(r"^(?:[-*])\s+(.+)$", stripped)
         text = f"- {bullet.group(1)}" if bullet else stripped
-        story.append(Paragraph(html.escape(text), styles["ReportBody"]))
+        story.append(Paragraph(_format_inline_pdf(text), styles["ReportBody"]))
 
     if sources:
         story.append(Paragraph("Sources", styles["Heading2"]))
@@ -351,11 +435,11 @@ def _render_images(images):
 
         if isinstance(url, str) and url.startswith(("https://", "http://")):
             pending.append((url, None, description))
-        elif isinstance(encoded, str):
+        elif isinstance(encoded, str) and encoded.strip():
             try:
-                pending.append(
-                    (None, base64.b64decode(encoded, validate=True), description)
-                )
+                decoded = base64.b64decode(encoded, validate=True)
+                if decoded:
+                    pending.append((None, decoded, description))
             except (ValueError, base64.binascii.Error):
                 continue
 
@@ -400,17 +484,17 @@ def _copy_icon_html(key_prefix, report):
     <button id="copy-reply-{key_prefix}" type="button"
         aria-label="Copy reply" title="Copy"
         style="display:flex;align-items:center;justify-content:center;
-        width:38px;height:38px;background:var(--vyom-panel);
-        border:1px solid var(--vyom-border);color:var(--vyom-fg);
-        border-radius:9px;cursor:pointer;padding:0 9px;min-width:38px;gap:5px;">
+        width:30px;height:30px;background:transparent;
+        border:1px solid transparent;color:var(--vyom-dim);
+        border-radius:50%;cursor:pointer;padding:0;min-width:30px;">
     </button>
     <script>
     (() => {{
         const button = document.getElementById("copy-reply-{key_prefix}");
         if (!button) return;
 
-        const COPY = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
-        const DONE = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+        const COPY = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+        const DONE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
 
         button.innerHTML = COPY;
 
@@ -421,11 +505,13 @@ def _copy_icon_html(key_prefix, report):
         let timer;
 
         const done = () => {{
-            button.innerHTML = DONE + '<span class="vyom-copy-label">Copied</span>';
+            button.innerHTML = DONE;
+            button.style.color = "var(--vyom-strong)";
             button.setAttribute("aria-label", "Copied");
             clearTimeout(timer);
             timer = setTimeout(() => {{
                 button.innerHTML = COPY;
+                button.style.color = "var(--vyom-dim)";
                 button.setAttribute("aria-label", "Copy reply");
             }}, 1000);
         }};
@@ -507,6 +593,17 @@ def _render_reply_actions(message, key_prefix, question="", is_last=False):
     report = _visible_report(report)
     feedback = message.get("feedback")
 
+    valid_sources = []
+    if isinstance(result, dict):
+        sources = result.get("sources")
+        if isinstance(sources, list):
+            valid_sources = [
+                source for source in sources
+                if isinstance(source, dict)
+                and isinstance(source.get("url"), str)
+                and source["url"].startswith(("https://", "http://"))
+            ]
+
     with st.container(
         key=f"{key_prefix}_actions",
         horizontal=True,
@@ -567,24 +664,16 @@ def _render_reply_actions(message, key_prefix, question="", is_last=False):
                 width="stretch",
             )
 
-    if isinstance(result, dict):
-        sources = result.get("sources")
-        valid_sources = [
-            source for source in sources
-            if isinstance(source, dict)
-            and isinstance(source.get("url"), str)
-            and source["url"].startswith(("https://", "http://"))
-        ] if isinstance(sources, list) else []
-
-        st.download_button(
-            "Download PDF",
-            data=_build_pdf(report, valid_sources),
-            file_name="response.pdf",
-            mime="application/pdf",
-            key=f"{key_prefix}_pdf",
-            help="Download this reply as a PDF",
-            width="content",
-        )
+        if isinstance(result, dict):
+            st.download_button(
+                "PDF",
+                data=_build_pdf(report, valid_sources),
+                file_name="response.pdf",
+                mime="application/pdf",
+                key=f"{key_prefix}_pdf",
+                help="Download this reply as a PDF",
+                type="tertiary",
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -627,25 +716,11 @@ def _render_result(result, key_prefix="result"):
 
     report = _visible_report(report)
 
-    _, top_copy_right = st.columns([0.90, 0.10], gap="small")
-    with top_copy_right:
-        st.html(
-            _copy_icon_html(f"{key_prefix}_top", report),
-            unsafe_allow_javascript=True,
-        )
-
     st.markdown(report)
 
     if result.get("kind") == "chat":
-        images = result.get("images")
-        generated_images = [
-            image for image in images
-            if isinstance(image, dict)
-            and image.get("description") == "Generated image"
-        ] if isinstance(images, list) else []
-
-        if generated_images:
-            _render_images(generated_images)
+        if result.get("images"):
+            _render_images(result.get("images"))
         return
 
     _render_images(result.get("images"))
@@ -690,11 +765,12 @@ def _render_result(result, key_prefix="result"):
         download_content += "\n\n## Sources\n\n" + "\n".join(source_lines)
 
     st.download_button(
-        "Download report",
+        "Download report (.md)",
         data=download_content,
         file_name="research-report.md",
         mime="text/markdown",
         key=f"{key_prefix}_download",
+        type="tertiary",
     )
 
 
@@ -976,32 +1052,56 @@ div[class*="st-key-assistant_msg_"] {
 }
 
 div[class*="_actions"] {
-    flex-wrap:nowrap!important;
-    gap:.1rem!important;
+    flex-wrap:wrap!important;
+    gap:.2rem!important;
     align-items:center;
 }
 
 div[class*="_actions"] button,
 div[class*="_regen"] button {
-    min-width:2.3rem!important;
-    padding-inline:.35rem!important;
+    width:30px!important;
+    height:30px!important;
+    min-width:30px!important;
+    max-width:30px!important;
+    padding:0!important;
+    border-radius:50%!important;
     background:transparent!important;
-    border-color:transparent!important;
+    border:1px solid transparent!important;
     box-shadow:none!important;
 }
 
 div[class*="_actions"] button span[data-testid="stIconMaterial"],
 div[class*="_regen"] button span[data-testid="stIconMaterial"] {
     color:var(--vyom-dim)!important;
+    font-size:16px!important;
+}
+
+div[class*="_actions"] button:hover,
+div[class*="_regen"] button:hover {
+    background:var(--vyom-soft)!important;
 }
 
 div[class*="_actions"] button:hover span[data-testid="stIconMaterial"] {
     color:var(--vyom-strong)!important;
 }
 
+div[class*="_like"] button[data-testid="stBaseButton-primary"],
+div[class*="_dislike"] button[data-testid="stBaseButton-primary"] {
+    width:30px!important;
+    height:30px!important;
+    min-width:30px!important;
+    max-width:30px!important;
+    padding:0!important;
+    border-radius:50%!important;
+    background:var(--vyom-strong)!important;
+    border:1px solid var(--vyom-strong)!important;
+    box-shadow:none!important;
+}
+
 div[class*="_like"] button[data-testid="stBaseButton-primary"] span[data-testid="stIconMaterial"],
 div[class*="_dislike"] button[data-testid="stBaseButton-primary"] span[data-testid="stIconMaterial"] {
-    color:var(--vyom-strong)!important;
+    color:var(--vyom-invert)!important;
+    font-size:16px!important;
 }
 
 .st-key-stop_generation {
@@ -1088,8 +1188,8 @@ div[data-testid="stChatInput"] textarea::placeholder {
     display:none;
     align-items:center;
     justify-content:center;
-    width:36px;
-    height:36px;
+    width:34px;
+    height:34px;
     padding:0;
     border-radius:50%;
     border:1px solid var(--vyom-border);
@@ -1143,8 +1243,9 @@ section[data-testid="stSidebar"] div[data-testid="stButton"]>button>div {
 
 st.markdown(BASE_CSS, unsafe_allow_html=True)
 
-# The external stylesheet controls both themes.
-st.session_state.setdefault("theme_mode", "System")
+_renderer_theme = _resolve_renderer_theme()
+st.session_state["theme_mode"] = _renderer_theme
+
 _THEME_CSS_PATH = os.path.join(os.path.dirname(__file__), "vyom_theme.css")
 
 try:
@@ -1153,48 +1254,8 @@ try:
 except OSError:
     st.warning("VYOM theme stylesheet was not found; using the default styling.")
 
-_theme_mode = st.session_state.get("theme_mode", "System")
-
 st.html(
-    f"""
-    <script>
-    (() => {{
-        const requested = {json.dumps(_theme_mode)};
-        const key = "vyom-theme-mode";
-        let saved = null;
-
-        try {{ saved = localStorage.getItem(key); }} catch (e) {{}}
-
-        const mode = requested === "System" ? (saved || "System") : requested;
-
-        const apply = value => {{
-            const resolved = value === "System"
-                ? (window.matchMedia("(prefers-color-scheme: light)").matches ? "Light" : "Dark")
-                : value;
-
-            document.documentElement.dataset.vyomTheme = resolved.toLowerCase();
-        }};
-
-        apply(mode);
-
-        if (requested !== "System") {{
-            try {{ localStorage.setItem(key, requested); }} catch (e) {{}}
-        }}
-
-        if (!window.__vyomThemeListener) {{
-            window.__vyomThemeListener = true;
-
-            window.matchMedia("(prefers-color-scheme: light)").addEventListener?.("change", () => {{
-                let current = "System";
-
-                try {{ current = localStorage.getItem(key) || "System"; }} catch (e) {{}}
-
-                if (current === "System") apply("System");
-            }});
-        }}
-    }})();
-    </script>
-    """,
+    _apply_renderer_theme_script(_renderer_theme),
     unsafe_allow_javascript=True,
 )
 
@@ -1245,12 +1306,7 @@ with st.sidebar:
 
     st.divider()
 
-    st.selectbox(
-        "Appearance",
-        options=["System", "Dark", "Light"],
-        key="theme_mode",
-        help="Choose a theme or follow your device appearance.",
-    )
+    st.caption(f"Renderer theme: {_renderer_theme}")
 
     _render_admin_panel()
 
@@ -1293,7 +1349,7 @@ st.html(
         down.type = "button";
         down.setAttribute("aria-label", "Scroll to latest message");
         down.innerHTML =
-            '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
+            '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
         document.body.appendChild(down);
 
         const pause = document.createElement("button");
@@ -1444,159 +1500,158 @@ elif pending:
 # ---------------------------------------------------------------------------
 
 if has_input:
-    if not topic and audio is None and not files:
-        st.warning("Write a message before sending.")
+    transcription_failed = False
 
-    else:
-        if audio is not None:
-            try:
-                with st.spinner("Transcribing your voice..."):
-                    transcript = transcribe_audio(
-                        (
-                            audio.name,
-                            audio.getvalue(),
-                            audio.type or "audio/wav",
-                        )
+    if audio is not None:
+        try:
+            with st.spinner("Transcribing your voice..."):
+                transcript = transcribe_audio(
+                    (
+                        audio.name,
+                        audio.getvalue(),
+                        audio.type or "audio/wav",
                     )
-
-                topic = "\n".join(part for part in (topic, transcript) if part)
-
-            except (OpenAIError, RuntimeError, TimeoutError, ValueError) as error:
-                st.error(
-                    "Voice transcription failed. Please try again or type your message."
                 )
-                st.caption(str(error))
 
-        if files and not topic:
-            topic = "Please summarize the attached file(s)."
+            topic = "\n".join(part for part in (topic, transcript) if part)
 
-        if topic:
-            conversation_history = _conversation_history(messages)
+        except (OpenAIError, RuntimeError, TimeoutError, ValueError) as error:
+            transcription_failed = True
+            st.error(
+                "Voice transcription failed. Please try again or type your message."
+            )
+            st.caption(str(error))
 
-            user_message = {
-                "role": "user",
-                "content": topic,
-                "files": files,
-            }
+    if files and not topic:
+        topic = "Please summarize the attached file(s)."
 
-            messages.append(user_message)
+    if topic:
+        conversation_history = _conversation_history(messages)
 
-            chat = _active_chat()
+        user_message = {
+            "role": "user",
+            "content": topic,
+            "files": files,
+        }
 
-            if chat["title"] == "New chat":
-                chat["title"] = topic[:32] + ("…" if len(topic) > 32 else "")
+        messages.append(user_message)
 
-            with st.container(key=f"user_msg_{len(messages) - 1}"):
-                st.markdown(_user_text(topic, files))
+        chat = _active_chat()
 
-            progress_steps = []
-            assistant_message = {
-                "role": "assistant",
-                "progress": progress_steps,
-            }
+        if chat["title"] == "New chat":
+            chat["title"] = topic[:32] + ("…" if len(topic) > 32 else "")
 
-            messages.append(assistant_message)
-            st.session_state["generation_active"] = True
+        with st.container(key=f"user_msg_{len(messages) - 1}"):
+            st.markdown(_user_text(topic, files))
 
-            # This button is retained for the existing stop-control UI.
-            # Reliable cancellation requires a non-blocking streaming architecture.
-            st.button(
-                "Stop",
-                key="stop_generation",
-                help="Stop the current response",
-                on_click=_stop_generation,
+        progress_steps = []
+        assistant_message = {
+            "role": "assistant",
+            "progress": progress_steps,
+        }
+
+        messages.append(assistant_message)
+        st.session_state["generation_active"] = True
+
+        st.button(
+            "Stop",
+            key="stop_generation",
+            help="Stop the current response",
+            on_click=_stop_generation,
+        )
+
+        with st.container(key=f"assistant_msg_{len(messages) - 1}"):
+            with st.expander(
+                "Thinking",
+                expanded=False,
+                key=f"thinking_current_{len(messages)}",
+                type="compact",
+            ):
+                progress_line = st.empty()
+
+            loader = st.empty()
+            loader_state = {"active": True}
+
+            loader.markdown(
+                _loader_html("Thinking..."),
+                unsafe_allow_html=True,
             )
 
-            with st.container(key=f"assistant_msg_{len(messages) - 1}"):
-                with st.expander(
-                    "Thinking",
-                    expanded=False,
-                    key=f"thinking_current_{len(messages)}",
-                    type="compact",
-                ):
-                    progress_line = st.empty()
+            def update_progress(stage):
+                progress_steps.append(stage)
+                progress_line.caption(stage)
 
-                loader = st.empty()
-                loader_state = {"active": True}
+            result_container = {}
 
-                # Keep this label constant. Detailed progress stays inside Thinking.
-                loader.markdown(
-                    _loader_html("Thinking..."),
-                    unsafe_allow_html=True,
-                )
-
-                def update_progress(stage):
-                    progress_steps.append(stage)
-                    progress_line.caption(stage)
-
-                result_container = {}
-
-                def tracked_stream():
-                    if files:
-                        stream = run_attachment_stream(
-                            topic,
-                            files,
-                            result_container,
-                            progress_callback=update_progress,
-                            conversation_history=conversation_history,
-                        )
-                    else:
-                        stream = run_research_stream(
-                            topic,
-                            result_container,
-                            progress_callback=update_progress,
-                            conversation_history=conversation_history,
-                        )
-
-                    for chunk in stream:
-                        if loader_state["active"]:
-                            loader_state["active"] = False
-                            loader.empty()
-
-                        assistant_message["partial_report"] = (
-                            assistant_message.get("partial_report", "") + chunk
-                        )
-
-                        yield chunk
-
-                try:
-                    st.write_stream(tracked_stream())
-                    result = result_container.get("result")
-                    st.session_state["generation_active"] = False
-
-                except (
-                    OpenAIError,
-                    RuntimeError,
-                    TimeoutError,
-                    ValueError,
-                ) as error:
-                    st.session_state["generation_active"] = False
-                    loader.empty()
-                    update_progress("The response could not be completed.")
-
-                    assistant_message["error"] = (
-                        "The request could not be completed. "
-                        "Check the error details below."
+            def tracked_stream():
+                if files:
+                    stream = run_attachment_stream(
+                        topic,
+                        files,
+                        result_container,
+                        progress_callback=update_progress,
+                        conversation_history=conversation_history,
                     )
-                    assistant_message["error_detail"] = str(error)
+                else:
+                    stream = run_research_stream(
+                        topic,
+                        result_container,
+                        progress_callback=update_progress,
+                        conversation_history=conversation_history,
+                    )
+
+                for chunk in stream:
+                    if loader_state["active"]:
+                        loader_state["active"] = False
+                        loader.empty()
+
+                    assistant_message["partial_report"] = (
+                        assistant_message.get("partial_report", "") + chunk
+                    )
+
+                    yield chunk
+
+            try:
+                st.write_stream(tracked_stream())
+                result = result_container.get("result")
+                st.session_state["generation_active"] = False
+
+            except (
+                OpenAIError,
+                RuntimeError,
+                TimeoutError,
+                ValueError,
+            ) as error:
+                st.session_state["generation_active"] = False
+                loader.empty()
+                update_progress("The response could not be completed.")
+
+                assistant_message["error"] = (
+                    "The request could not be completed. "
+                    "Check the error details below."
+                )
+                assistant_message["error_detail"] = str(error)
+
+            else:
+                if context := result_container.get("attachment_context"):
+                    user_message["attachment_context"] = context
+
+                if not isinstance(result, dict):
+                    update_progress("The service returned an unexpected response.")
+                    assistant_message["error"] = (
+                        "The research service returned an unexpected response."
+                    )
+
+                elif result.get("error"):
+                    update_progress("The response could not be completed.")
+                    assistant_message["error"] = str(result["error"])
 
                 else:
-                    if context := result_container.get("attachment_context"):
-                        user_message["attachment_context"] = context
+                    update_progress("Response ready.")
+                    assistant_message.pop("partial_report", None)
+                    assistant_message["result"] = result
 
-                    if not isinstance(result, dict):
-                        update_progress("The service returned an unexpected response.")
-                        assistant_message["error"] = (
-                            "The research service returned an unexpected response."
-                        )
+        st.rerun()
 
-                    elif result.get("error"):
-                        update_progress("The response could not be completed.")
-                        assistant_message["error"] = str(result["error"])
-
-                    else:
-                        update_progress("Response ready.")
-                        assistant_message.pop("partial_report", None)
-                        assistant_message["result"] = result
-
-            st.rerun()
+    elif not transcription_failed:
+        st.warning("Write a message before sending.")
