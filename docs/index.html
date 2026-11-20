@@ -9,11 +9,11 @@
 <style>
 :root {
   --bg: #0e0f13; --fg: #e8eaed; --dim: rgba(255,255,255,.55);
-  --soft: rgba(255,255,255,.07); --line: rgba(255,255,255,.14); --glow: rgba(160,170,255,.22);
+  --soft: rgba(255,255,255,.07); --glow: rgba(160,170,255,.22);
 }
 @media (prefers-color-scheme: light) {
   :root { --bg: #ffffff; --fg: #111827; --dim: rgba(0,0,0,.55);
-          --soft: rgba(0,0,0,.05); --line: rgba(0,0,0,.14); --glow: rgba(110,120,255,.2); }
+          --soft: rgba(0,0,0,.05); --glow: rgba(110,120,255,.2); }
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
@@ -23,40 +23,22 @@ body {
   display: flex; align-items: center; justify-content: center; padding: 1.25rem;
 }
 main { width: 100%; max-width: 30rem; text-align: center; }
+.icon { width: 3.4rem; height: 3.4rem; margin: 0 auto .6rem; display: block; animation: rise .7s ease both; }
 h1 {
   font-family: "Cormorant Garamond", Georgia, serif; font-style: italic; font-weight: 700;
   font-size: clamp(2.6rem, 10vw, 3.6rem); letter-spacing: .18em; text-transform: uppercase;
   margin: 0 0 .4rem; animation: rise .8s ease both;
+  background: linear-gradient(100deg, #e77abf, #9b83e8 55%, #53b9d4);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
 }
-.sub { color: var(--dim); margin: 0 0 1.6rem; animation: rise .8s .1s ease both; }
-
-/* a small glimpse of the chat */
-.chat { text-align: left; display: grid; gap: .7rem; margin-bottom: 1.6rem; }
-.me {
-  justify-self: end; max-width: 80%; padding: .6rem .9rem; border: 1px solid var(--line);
-  background: var(--soft); border-radius: 1.1rem 1.1rem .25rem 1.1rem; font-size: .95rem;
-  animation: rise .7s .3s ease both;
-}
-.bot { display: grid; gap: .45rem; animation: rise .7s .7s ease both; }
-.bot i {
-  display: block; height: .7rem; border-radius: .4rem; width: 100%;
-  background: linear-gradient(90deg, var(--soft) 20%, var(--line) 50%, var(--soft) 80%);
-  background-size: 200% 100%; animation: shimmer 1.6s linear infinite;
-}
-.bot i:nth-child(2) { width: 88%; } .bot i:nth-child(3) { width: 64%; }
-
+.sub { color: var(--dim); margin: 0 0 1.8rem; animation: rise .8s .1s ease both; }
 .status { display: flex; align-items: center; justify-content: center; gap: .6rem; color: var(--dim); font-size: .95rem; }
 .dots { display: inline-flex; gap: 4px; }
 .dots span { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: bounce 1.2s infinite ease-in-out; }
 .dots span:nth-child(2) { animation-delay: .15s; } .dots span:nth-child(3) { animation-delay: .3s; }
-.bar { height: 3px; border-radius: 3px; background: var(--soft); margin: 1.1rem auto 1rem; overflow: hidden; max-width: 16rem; }
+.bar { height: 3px; border-radius: 3px; background: var(--soft); margin: 1.1rem auto 0; overflow: hidden; max-width: 16rem; }
 .bar b { display: block; height: 100%; width: 40%; background: var(--fg); border-radius: 3px; animation: slide 1.6s ease-in-out infinite; }
-a.open {
-  display: inline-block; margin-top: .4rem; padding: .55rem 1.1rem; border: 1px solid var(--line);
-  border-radius: 999px; color: var(--fg); text-decoration: none; font-size: .9rem; background: var(--soft);
-}
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-@keyframes shimmer { to { background-position: -200% 0; } }
 @keyframes bounce { 0%,80%,100% { opacity: .3; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-4px); } }
 @keyframes slide { 0% { transform: translateX(-120%); } 100% { transform: translateX(300%); } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
@@ -64,58 +46,49 @@ a.open {
 </head>
 <body>
 <main>
+  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="url(#g)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8c78e8"/><stop offset="1" stop-color="#48b6ce"/></linearGradient></defs>
+    <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>
+  </svg>
   <h1>Vyom</h1>
   <p class="sub">Your AI research assistant</p>
-
-  <div class="chat" aria-hidden="true">
-    <div class="me">Explain how AI agents work</div>
-    <div class="bot"><i></i><i></i><i></i></div>
-  </div>
-
   <div class="status"><span class="dots"><span></span><span></span><span></span></span><span id="msg">Waking up VYOM…</span></div>
   <div class="bar"><b></b></div>
-  <a class="open" id="open" href="#">Open VYOM now</a>
 </main>
 
 <script>
   // Change this if your app address changes.
   const APP = "https://ai-research-assistant-sw7p.onrender.com";
-  const MIN_SHOW_MS = 1500;     // always show the animation at least this long
-  const MAX_WAIT_MS = 60000;    // after this, open the app anyway
+  const APP_URL = APP + "/?from=splash";   // "from=splash" makes the app skip its own intro
+  const MIN_SHOW_MS = 2200;                // show the animation at least this long
+  const MAX_WAIT_MS = 12000;               // open the app anyway after this
 
-  document.getElementById("open").href = APP;
   const started = Date.now();
-  let finished = false;
+  let done = false;
 
-  const go = (text) => {
-    if (finished) return;
-    finished = true;
-    document.getElementById("msg").textContent = text;
+  const go = () => {
+    if (done) return;
+    done = true;
+    document.getElementById("msg").textContent = "Ready!";
     const wait = Math.max(0, MIN_SHOW_MS - (Date.now() - started));
-    setTimeout(() => { window.location.href = APP; }, wait + 400);
+    setTimeout(() => { window.location.replace(APP_URL); }, wait + 300);
   };
 
-  const ping = async () => {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 15000);
-    try {
-      // "no-cors" can't read the answer, but it succeeds as soon as the server replies.
-      await fetch(APP + "/_stcore/health?t=" + Date.now(), { mode: "no-cors", cache: "no-store", signal: ctrl.signal });
-      return true;
-    } catch (e) {
-      return false;
-    } finally {
-      clearTimeout(timer);
-    }
-  };
+  // The app tells us when its front screen is ready.
+  window.addEventListener("message", (event) => {
+    if (event.origin === APP && event.data && event.data.type === "vyom-ready") go();
+  });
 
-  (async () => {
-    while (!finished) {
-      if (await ping()) { go("Ready!"); break; }
-      if (Date.now() - started > MAX_WAIT_MS) { go("Opening…"); break; }
-      await new Promise(r => setTimeout(r, 2500));
-    }
-  })();
+  // Load the app quietly in the background so it is warm and cached.
+  const frame = document.createElement("iframe");
+  frame.src = APP_URL;
+  frame.tabIndex = -1;
+  frame.setAttribute("aria-hidden", "true");
+  frame.style.cssText =
+    "position:fixed;left:-10000px;top:0;width:1100px;height:800px;border:0;opacity:0;pointer-events:none;";
+  document.body.appendChild(frame);
+
+  setTimeout(go, MAX_WAIT_MS);
 </script>
 </body>
 </html>

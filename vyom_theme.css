@@ -293,7 +293,7 @@ html[data-vyom-theme] button.vyom-copy {
     border-radius: 50% !important;
     background: transparent !important;
     border: 1px solid var(--vyom-border) !important;
-    color: var(--vyom-dim) !important;
+    color: var(--vyom-fg) !important;
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
@@ -348,17 +348,35 @@ html[data-vyom-theme] div[class*="_actions"] [data-testid="stPopover"] {
 }
 
 /* custom copy button (static markup, handled by the global script) */
-button.vyom-copy svg {
-    width: 16px;
-    height: 16px;
+button.vyom-copy::before {
+    content: "";
     display: block;
+    width: 18px;
+    height: 18px;
+    background-color: currentColor;
     pointer-events: none;
+    -webkit-mask: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='9' width='13' height='13' rx='2'/%3E%3Cpath d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'/%3E%3C/svg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='9' width='13' height='13' rx='2'/%3E%3Cpath d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 
-button.vyom-copy .vyom-done { display: none; }
-button.vyom-copy.copied .vyom-done { display: block; }
-button.vyom-copy.copied .vyom-copy-icon { display: none; }
+button.vyom-copy.copied::before {
+    -webkit-mask: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6L9 17l-5-5'/%3E%3C/svg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6L9 17l-5-5'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
 button.vyom-copy.copied { color: var(--vyom-accent-2) !important; }
+
+/* ============================================================
+   MAGNIFYING GLASS (replaces the flower on the greeting)
+   ============================================================ */
+
+.vyom-search-icon {
+    width: clamp(3rem, 7vw, 5rem);
+    height: clamp(3rem, 7vw, 5rem);
+    background: linear-gradient(135deg, var(--vyom-accent), var(--vyom-accent-2));
+    -webkit-mask: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M21 21l-4.3-4.3'/%3E%3C/svg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M21 21l-4.3-4.3'/%3E%3C/svg%3E") center / contain no-repeat;
+}
 
 /* ============================================================
    CHAT INPUT
@@ -397,11 +415,24 @@ html[data-vyom-theme] [data-testid="stChatInput"] button svg {
    FLOATING BUTTONS
    ============================================================ */
 
-#vyom-scroll-down,
-#vyom-pause {
+#vyom-scroll-down {
     background: var(--vyom-pop) !important;
     color: var(--vyom-strong) !important;
     border: 1px solid var(--vyom-border) !important;
+}
+
+#vyom-pause {
+    background: linear-gradient(135deg, var(--vyom-accent), var(--vyom-accent-2)) !important;
+    color: #ffffff !important;
+    border: 2px solid rgba(255, 255, 255, 0.85) !important;
+    box-shadow: 0 0 0 0 rgba(140, 120, 232, 0.55), 0 4px 14px rgba(0, 0, 0, 0.35) !important;
+    animation: vyom-pulse 1.6s infinite !important;
+}
+
+@keyframes vyom-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(140, 120, 232, 0.55), 0 4px 14px rgba(0, 0, 0, 0.35); }
+    70%  { box-shadow: 0 0 0 10px rgba(140, 120, 232, 0), 0 4px 14px rgba(0, 0, 0, 0.35); }
+    100% { box-shadow: 0 0 0 0 rgba(140, 120, 232, 0), 0 4px 14px rgba(0, 0, 0, 0.35); }
 }
 
 /* ============================================================

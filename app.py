@@ -572,7 +572,7 @@ def _copy_icon_html(report):
 
     return (
         '<button type="button" class="vyom-copy" aria-label="Copy reply" '
-        f'title="Copy" data-text="{encoded}">{_COPY_SVG}{_DONE_SVG}</button>'
+        f'title="Copy" data-text="{encoded}"></button>'
     )
 
 
@@ -1080,8 +1080,8 @@ div[class*="st-key-assistant_msg_"] {
     display:none;
     align-items:center;
     justify-content:center;
-    width:32px;
-    height:32px;
+    width:38px;
+    height:38px;
     padding:0;
     border-radius:50%;
     cursor:pointer;
@@ -1211,6 +1211,69 @@ st.html(
 )
 
 # ---------------------------------------------------------------------------
+# Intro animation (same look as index.html). Plays once per session and is
+# skipped when the visitor already saw index.html (it adds ?from=splash).
+# The HTML part is kept on one line on purpose: markdown would turn
+# indented / blank-line-separated HTML into a code block.
+# ---------------------------------------------------------------------------
+
+_INTRO_HTML = (
+    "<style>"
+    "#vyom-intro{position:fixed;inset:0;z-index:2000000;display:flex;align-items:center;"
+    "justify-content:center;padding:1.25rem;"
+    "background:radial-gradient(60rem 40rem at 50% -10%,rgba(160,170,255,.22),transparent 60%),var(--vyom-bg,#0e0f13);"
+    "color:var(--vyom-fg,#e8eaed);animation:vyom-intro-out .6s ease 2.4s forwards;}"
+    "#vyom-intro .vi-box{width:100%;max-width:30rem;text-align:center;}"
+    "#vyom-intro .vyom-search-icon{width:3.4rem;height:3.4rem;margin:0 auto .6rem;animation:vi-rise .7s ease both;}"
+    "#vyom-intro .vi-title{font-family:'Cormorant Garamond',Georgia,serif;font-style:italic;font-weight:700;"
+    "font-size:clamp(2.6rem,10vw,3.6rem);letter-spacing:.18em;text-transform:uppercase;margin:0 0 .4rem;"
+    "background:linear-gradient(100deg,#e77abf,#9b83e8 55%,#53b9d4);-webkit-background-clip:text;"
+    "background-clip:text;color:transparent;animation:vi-rise .8s ease both;}"
+    "#vyom-intro .vi-sub{color:var(--vyom-dim,#aab5c9);margin:0 0 1.6rem;animation:vi-rise .8s .1s ease both;}"
+    "#vyom-intro .vi-chat{text-align:left;display:grid;gap:.7rem;margin-bottom:1.6rem;}"
+    "#vyom-intro .vi-me{justify-self:end;max-width:80%;padding:.6rem .9rem;border:1px solid var(--vyom-border,rgba(255,255,255,.14));"
+    "background:var(--vyom-soft,rgba(255,255,255,.07));border-radius:1.1rem 1.1rem .25rem 1.1rem;font-size:.95rem;"
+    "animation:vi-rise .7s .3s ease both;}"
+    "#vyom-intro .vi-bot{display:grid;gap:.45rem;animation:vi-rise .7s .7s ease both;}"
+    "#vyom-intro .vi-bot i{display:block;height:.7rem;border-radius:.4rem;width:100%;"
+    "background:linear-gradient(90deg,var(--vyom-soft,rgba(255,255,255,.07)) 20%,var(--vyom-border,rgba(255,255,255,.14)) 50%,var(--vyom-soft,rgba(255,255,255,.07)) 80%);"
+    "background-size:200% 100%;animation:vi-shimmer 1.6s linear infinite;}"
+    "#vyom-intro .vi-bot i:nth-child(2){width:88%;}#vyom-intro .vi-bot i:nth-child(3){width:64%;}"
+    "#vyom-intro .vi-status{display:flex;align-items:center;justify-content:center;gap:.6rem;"
+    "color:var(--vyom-dim,#aab5c9);font-size:.95rem;}"
+    "#vyom-intro .vi-dots{display:inline-flex;gap:4px;}"
+    "#vyom-intro .vi-dots span{width:7px;height:7px;border-radius:50%;background:currentColor;"
+    "animation:vi-bounce 1.2s infinite ease-in-out;}"
+    "#vyom-intro .vi-dots span:nth-child(2){animation-delay:.15s;}"
+    "#vyom-intro .vi-dots span:nth-child(3){animation-delay:.3s;}"
+    "#vyom-intro .vi-bar{height:3px;border-radius:3px;background:var(--vyom-soft,rgba(255,255,255,.07));"
+    "margin:1.1rem auto 0;overflow:hidden;max-width:16rem;}"
+    "#vyom-intro .vi-bar b{display:block;height:100%;width:40%;background:var(--vyom-fg,#e8eaed);"
+    "border-radius:3px;animation:vi-slide 1.6s ease-in-out infinite;}"
+    "@keyframes vyom-intro-out{to{opacity:0;visibility:hidden;pointer-events:none;}}"
+    "@keyframes vi-rise{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}"
+    "@keyframes vi-shimmer{to{background-position:-200% 0;}}"
+    "@keyframes vi-bounce{0%,80%,100%{opacity:.3;transform:translateY(0);}40%{opacity:1;transform:translateY(-4px);}}"
+    "@keyframes vi-slide{0%{transform:translateX(-120%);}100%{transform:translateX(300%);}}"
+    "@media(prefers-reduced-motion:reduce){#vyom-intro *{animation:none!important;}"
+    "#vyom-intro{animation-duration:.01s!important;animation-delay:.6s!important;}}"
+    "</style>"
+    '<div id="vyom-intro" aria-hidden="true"><div class="vi-box">'
+    '<div class="vyom-search-icon"></div>'
+    '<div class="vi-title">Vyom</div>'
+    '<p class="vi-sub">Your AI research assistant</p>'
+    '<div class="vi-status"><span class="vi-dots"><span></span><span></span><span></span></span>'
+    "<span>Getting things ready…</span></div>"
+    '<div class="vi-bar"><b></b></div>'
+    "</div></div>"
+)
+
+if "intro_done" not in st.session_state:
+    st.session_state["intro_done"] = True
+    if st.query_params.get("from") != "splash":
+        st.markdown(_INTRO_HTML, unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------------
 # Session initialization
 # ---------------------------------------------------------------------------
 
@@ -1294,8 +1357,8 @@ else:
 
         with flower_column:
             st.markdown(
-                '<div class="jasmine-flower" role="img" '
-                'aria-label="White jasmine flower">❀</div>',
+                '<div class="vyom-search-icon" role="img" '
+                'aria-label="Search"></div>',
                 unsafe_allow_html=True,
             )
 
@@ -1388,8 +1451,9 @@ st.html(
             const send = findSend();
             const box = document.querySelector('[data-testid="stChatInput"]');
 
-            if (source && (send || box)) {
-                let cx, cy;
+            if (source) {
+                let cx = window.innerWidth - 40;
+                let cy = window.innerHeight - 50;
                 const rect = send ? send.getBoundingClientRect() : null;
 
                 if (rect && rect.width) {
@@ -1397,14 +1461,16 @@ st.html(
                     cy = rect.top + rect.height / 2;
                     send.style.visibility = "hidden";
                     hiddenSend = send;
-                } else {
+                } else if (box) {
                     const b = box.getBoundingClientRect();
-                    cx = b.right - 28;
-                    cy = b.top + b.height / 2;
+                    if (b.width) {
+                        cx = b.right - 30;
+                        cy = b.top + b.height / 2;
+                    }
                 }
 
-                pause.style.left = (cx - 16) + "px";
-                pause.style.top = (cy - 16) + "px";
+                pause.style.left = (cx - 19) + "px";
+                pause.style.top = (cy - 19) + "px";
                 pause.classList.add("show");
             } else {
                 pause.classList.remove("show");
@@ -1412,6 +1478,13 @@ st.html(
                     hiddenSend.style.visibility = "";
                     hiddenSend = null;
                 }
+            }
+
+            // when loaded inside the splash page, say "ready" once the chat box exists
+            if (window.parent !== window && !window.__vyomReadySent &&
+                document.querySelector('[data-testid="stChatInput"]')) {
+                window.__vyomReadySent = true;
+                try { window.parent.postMessage({ type: "vyom-ready" }, "*"); } catch (e) {}
             }
 
             // reveal the native "share with phone apps" button where supported
