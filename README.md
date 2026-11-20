@@ -26,9 +26,6 @@ ping, but if the first load is slow, give it a few seconds.
   transcribed with Groq and handled like typed text.
 - **File attachments:** attach PDF, image, text, Markdown or CSV files and ask
   questions about them.
-- **Image generation:** requests such as "draw…", "generate image…" or
-  "make an image…" use Gemini (`gemini-2.5-flash-image`), with Pollinations as
-  a fallback.
 - **Reply controls:** like / dislike, regenerate, copy, share (WhatsApp,
   Telegram, X, Facebook, email, plain text) and download as PDF. Research
   reports also download as Markdown.
