@@ -347,35 +347,6 @@ html[data-vyom-theme] div[class*="_actions"] [data-testid="stPopover"] {
     width: auto !important;
 }
 
-/* the copy button lives in a small frame: never let it stretch the row */
-html[data-vyom-theme] div[class*="_actions"] iframe {
-    width: 34px !important;
-    min-width: 34px !important;
-    max-width: 34px !important;
-    height: 34px !important;
-    display: block !important;
-}
-
-html[data-vyom-theme] div[class*="_actions"] [data-testid="stElementContainer"]:has(iframe) {
-    width: 34px !important;
-    min-width: 34px !important;
-    max-width: 34px !important;
-    flex: 0 0 34px !important;
-}
-
-html[data-vyom-theme] div[class*="_actions"] [data-testid="stHorizontalBlock"] {
-    display: flex !important;
-    flex-wrap: nowrap !important;
-    justify-content: flex-start !important;
-    gap: 0.35rem !important;
-}
-
-/* frosted chat box so text scrolling underneath never shows through */
-html[data-vyom-theme] [data-testid="stChatInput"] > div {
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-}
-
 /* custom copy button (static markup, handled by the global script) */
 button.vyom-copy::before {
     content: "";
