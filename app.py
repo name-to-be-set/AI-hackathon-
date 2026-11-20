@@ -576,6 +576,75 @@ def _copy_icon_html(report):
     )
 
 
+def _render_copy_button(report):
+    """Copy button that carries its own script, so it does not depend on the
+    page-level script. Falls back to the old markup if components are missing."""
+    mode = st.session_state.get("user_theme_override", "System")
+    encoded = base64.b64encode(report.encode("utf-8")).decode("ascii")
+
+    if mode == "Light":
+        fg, border, hover, accent = "#1c2b42", "rgba(65,100,143,.30)", "rgba(205,220,240,.7)", "#1f86a6"
+    else:
+        fg, border, hover, accent = "#edf1fa", "rgba(160,177,205,.28)", "rgba(130,151,190,.14)", "#48b6ce"
+
+    media = ""
+    if mode == "System":
+        media = (
+            "@media (prefers-color-scheme: light){"
+            "button{border-color:rgba(65,100,143,.30);color:#1c2b42}"
+            "button:hover{background:rgba(205,220,240,.7);border-color:#1f86a6}"
+            "button.ok{color:#1f86a6}}"
+        )
+
+    document = f"""<!doctype html><html><head><meta charset="utf-8"><style>
+html,body{{margin:0;padding:0;background:transparent;overflow:hidden}}
+body{{display:flex;align-items:center;justify-content:center;height:34px}}
+button{{box-sizing:border-box;width:32px;height:32px;border-radius:50%;border:1px solid {border};
+background:transparent;color:{fg};cursor:pointer;padding:0;display:flex;align-items:center;
+justify-content:center;transition:background .2s,border-color .2s,color .2s}}
+button:hover{{background:{hover};border-color:{accent}}}
+button.ok{{color:{accent}}}
+svg{{width:18px;height:18px;pointer-events:none}}
+.d{{display:none}} .ok .c{{display:none}} .ok .d{{display:block}}
+{media}
+</style></head><body>
+<button id="b" type="button" title="Copy" aria-label="Copy reply">
+<svg class="c" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+<svg class="d" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+</button>
+<script>
+const text = new TextDecoder().decode(Uint8Array.from(atob("{encoded}"), c => c.charCodeAt(0)));
+const b = document.getElementById("b");
+b.addEventListener("click", async () => {{
+  let ok = false;
+  try {{
+    await navigator.clipboard.writeText(text);
+    ok = true;
+  }} catch (e) {{
+    const t = document.createElement("textarea");
+    t.value = text;
+    t.style.position = "fixed";
+    t.style.opacity = "0";
+    document.body.appendChild(t);
+    t.select();
+    try {{ ok = document.execCommand("copy"); }} catch (e2) {{}}
+    t.remove();
+  }}
+  if (ok) {{
+    b.classList.add("ok");
+    setTimeout(() => b.classList.remove("ok"), 1200);
+  }}
+}});
+</script></body></html>"""
+
+    try:
+        import streamlit.components.v1 as components
+
+        components.html(document, height=34, width=34)
+    except Exception:
+        _html_inline(_copy_icon_html(report))
+
+
 def _native_share_html(report):
     encoded = base64.b64encode(report.encode("utf-8")).decode("ascii")
 
@@ -664,7 +733,7 @@ def _render_reply_actions(message, key_prefix, question="", is_last=False):
                 on_click=_regenerate,
             )
 
-        _html_inline(_copy_icon_html(report))
+        _render_copy_button(report)
 
         with st.popover(
             "\u200b",
