@@ -104,6 +104,10 @@ DEFAULT_BIFROST_MODELS = (
 
 COOLDOWN_SECONDS = 60
 
+# "low" makes gpt-oss models start answering much faster.
+# Set REASONING_EFFORT=medium on Render to undo this.
+REASONING_EFFORT = os.getenv("REASONING_EFFORT", "low").strip().lower()
+
 NO_TOOLS_NOTE = (
     " You have no tools or functions. Never attempt a tool call; "
     "reply with plain text only."
@@ -281,6 +285,17 @@ def _client_for(target: _Target) -> OpenAI:
     )
 
 
+def _extra_options(target: _Target) -> dict[str, Any]:
+    """Extra request options; only direct Groq gpt-oss models get them."""
+    if (
+        REASONING_EFFORT in {"low", "medium", "high"}
+        and target.label.startswith("groq:")
+        and "gpt-oss" in target.model
+    ):
+        return {"extra_body": {"reasoning_effort": REASONING_EFFORT}}
+    return {}
+
+
 def _no_tool_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
     if not messages:
         return [{"role": "system", "content": NO_TOOLS_NOTE.strip()}]
@@ -334,9 +349,10 @@ def call_llm(
         client = _client_for(target)
         try:
             return _provider_request(
-                lambda c=client, m=target.model: c.chat.completions.create(
+                lambda c=client, m=target.model, x=_extra_options(target): c.chat.completions.create(
                     model=m,
                     messages=prepared_messages,
+                    **x,
                 )
             )
         except (OpenAIError, TimeoutError) as error:
@@ -351,6 +367,7 @@ def _stream_provider(
     messages: list[dict[str, str]],
     model: str,
     cancel_event: threading.Event | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> Iterator[str]:
     for attempt in range(MAX_PROVIDER_RETRIES + 1):
         yielded = False
@@ -361,6 +378,7 @@ def _stream_provider(
                 model=model,
                 messages=messages,
                 stream=True,
+                **(extra or {}),
             )
 
             for event in stream:
@@ -409,6 +427,7 @@ def stream_llm(
                 prepared_messages,
                 target.model,
                 cancel_event,
+                _extra_options(target),
             )
             return
         except GenerationStopped:
