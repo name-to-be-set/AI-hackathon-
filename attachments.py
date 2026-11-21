@@ -1,6 +1,6 @@
 """Reads files attached with the "+" button and answers questions about them.
 
-agent.py does not need to change: this module imports its helpers.
+agent.py only needs a tiny change for this module (see _final_error there).
 """
 import base64
 from collections.abc import Callable
@@ -15,15 +15,19 @@ from agent import (
     BASE_SYSTEM_PROMPT,
     GEMINI_BASE_URL,
     GEMINI_MODEL,
-    LLM_UNAVAILABLE_MESSAGE,
+    GROQ_BASE_URL,
     _Target,
     _client_for,
+    _extra_options,
+    _final_error,
     _history_messages,
+    _no_tool_messages,
     _normalize_model_output,
     _note_failure,
     _provider_request,
     _response_content,
-    stream_llm,
+    _stream_provider,
+    _usable_targets,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -31,6 +35,13 @@ LOGGER = logging.getLogger(__name__)
 MAX_FILE_BYTES = 8_000_000
 MAX_CONTEXT_CHARACTERS = 12_000
 MAX_IMAGES = 3
+MAX_IMAGE_SIDE = 1600
+MAX_PDF_PAGE_IMAGES = 3
+
+# Used only as a backup when Gemini cannot read an image.
+GROQ_VISION_MODEL = os.getenv(
+    "GROQ_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct"
+)
 
 
 def _pdf_text(data: bytes) -> str:
@@ -54,15 +65,58 @@ def _pdf_text(data: bytes) -> str:
         return ""
 
 
+def _pdf_page_images(data: bytes) -> list[tuple[str, bytes, str]]:
+    """Turn the first pages of a scanned PDF into images (needs pymupdf)."""
+    try:
+        import fitz  # pymupdf
+    except ImportError:
+        return []
+
+    try:
+        document = fitz.open(stream=data, filetype="pdf")
+        pages = []
+        for index in range(min(len(document), MAX_PDF_PAGE_IMAGES)):
+            pixmap = document[index].get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+            pages.append((f"page-{index + 1}.png", pixmap.tobytes("png"), "image/png"))
+        return pages
+    except Exception as error:
+        LOGGER.warning("Could not render PDF pages: %s", error)
+        return []
+
+
+def _prepare_image(data: bytes, mime: str) -> tuple[bytes, str]:
+    """Shrink big phone photos so they upload to the AI faster and fit limits."""
+    try:
+        from PIL import Image, ImageOps
+
+        with Image.open(BytesIO(data)) as image:
+            image = ImageOps.exif_transpose(image)
+            image.thumbnail((MAX_IMAGE_SIDE, MAX_IMAGE_SIDE))
+            buffer = BytesIO()
+            image.convert("RGB").save(buffer, format="JPEG", quality=85, optimize=True)
+        return buffer.getvalue(), "image/jpeg"
+    except Exception as error:
+        LOGGER.warning("Could not resize image: %s", error)
+        return data, mime
+
+
 def _vision_targets() -> list[_Target]:
+    targets: list[_Target] = []
+
     bifrost_url = os.getenv("BIFROST_BASE_URL", "").strip()
     if bifrost_url:
         key = os.getenv("BIFROST_API_KEY", "").strip() or "bifrost"
-        return [_Target("bifrost:vision", bifrost_url, key, "gemini/gemini-2.5-flash")]
+        targets.append(_Target("bifrost:vision", bifrost_url, key, "gemini/gemini-2.5-flash"))
+
     gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
     if gemini_key:
-        return [_Target("gemini:vision", GEMINI_BASE_URL, gemini_key, GEMINI_MODEL)]
-    return []
+        targets.append(_Target("gemini:vision", GEMINI_BASE_URL, gemini_key, GEMINI_MODEL))
+
+    groq_key = os.getenv("GROQ_API_KEY", "").strip()
+    if groq_key and GROQ_VISION_MODEL:
+        targets.append(_Target("groq:vision", GROQ_BASE_URL, groq_key, GROQ_VISION_MODEL))
+
+    return targets
 
 
 def _describe_images(images: list[tuple[str, bytes, str]], question: str) -> str:
@@ -82,6 +136,7 @@ def _describe_images(images: list[tuple[str, bytes, str]], question: str) -> str
         }
     ]
     for _, data, mime in images[:MAX_IMAGES]:
+        data, mime = _prepare_image(data, mime)
         encoded = base64.b64encode(data).decode("ascii")
         content.append(
             {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}}
@@ -104,7 +159,9 @@ def _describe_images(images: list[tuple[str, bytes, str]], question: str) -> str
             _note_failure(target, error)
             failures.append(error)
 
-    raise RuntimeError(LLM_UNAVAILABLE_MESSAGE)
+    if failures:
+        raise _final_error(failures) from failures[-1]
+    raise RuntimeError("The AI could not read the image. Please try another one.")
 
 
 def extract_attachment_context(
@@ -124,10 +181,16 @@ def extract_attachment_context(
             images.append((name, data, mime if mime.startswith("image/") else "image/png"))
             continue
         if mime == "application/pdf" or lowered.endswith(".pdf"):
-            body = _pdf_text(data) or (
-                "[No readable text found. It may be a scanned PDF; try attaching "
-                "photos of the pages instead.]"
-            )
+            body = _pdf_text(data)
+            if not body:
+                pages = _pdf_page_images(data)
+                if pages:
+                    images.extend(pages)
+                    continue
+                body = (
+                    "[No readable text found. It may be a scanned PDF; try attaching "
+                    "photos of the pages instead.]"
+                )
         else:
             body = data.decode("utf-8", errors="replace").strip()
         body = body[: max(remaining, 0)]
@@ -140,6 +203,36 @@ def extract_attachment_context(
         sections.append(f"--- Image(s): {names} ---\n{description[:4000]}")
 
     return "\n\n".join(sections)
+
+
+def _stream_attachment_answer(messages: list[dict[str, str]]) -> Iterator[str]:
+    """Stream an answer, trying Gemini first (it handles long files on the
+    free plan), then Bifrost, then Groq."""
+    prepared = _no_tool_messages(messages)
+    order = {"gemini:": 0, "bifrost:": 1, "groq:": 2}
+
+    def rank(target: _Target) -> int:
+        for prefix, value in order.items():
+            if target.label.startswith(prefix):
+                return value
+        return 3
+
+    failures: list[Exception] = []
+    for target in sorted(_usable_targets(None), key=rank):
+        try:
+            yield from _stream_provider(
+                _client_for(target),
+                prepared,
+                target.model,
+                None,
+                _extra_options(target),
+            )
+            return
+        except (OpenAIError, TimeoutError) as error:
+            _note_failure(target, error)
+            failures.append(error)
+
+    raise _final_error(failures) from (failures[-1] if failures else None)
 
 
 def run_attachment_stream(
@@ -174,7 +267,7 @@ def run_attachment_stream(
         {"role": "user", "content": f"{topic}\n\nAttached content:\n{context}"},
     ]
     chunks: list[str] = []
-    for chunk in stream_llm(messages):
+    for chunk in _stream_attachment_answer(messages):
         chunks.append(chunk)
         yield chunk
     report = _normalize_model_output("".join(chunks))
