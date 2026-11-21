@@ -235,9 +235,9 @@ def _background_css() -> str:
 # ---------------------------------------------------------------------------
 
 def _logo_path():
-    """Find logo.png in static/, assets/, images/ or next to app.py."""
+    """Find logo.jpg in static/, assets/, images/ or next to app.py."""
     for folder in ("static", "assets", "images", ""):
-        path = APP_DIR / folder / "logo.png"
+        path = APP_DIR / folder / "logo.jpg"
         if path.is_file():
             return path
     return None
