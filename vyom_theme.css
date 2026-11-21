@@ -378,6 +378,28 @@ button.vyom-copy.copied { color: var(--vyom-accent-2) !important; }
     mask: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M21 21l-4.3-4.3'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 
+/* greeting line + magnifying glass side by side */
+.greeting-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.greeting-row .vyom-search-icon {
+    flex: 0 0 auto;
+}
+
+/* ============================================================
+   HEADER LOGO (top-left, replaces the VYOM text)
+   ============================================================ */
+
+.stApp .st-key-app_title img.vyom-header-logo {
+    height: 2.4rem;
+    width: auto;
+    display: block;
+    border-radius: 0.6rem;
+}
+
 /* ============================================================
    CHAT INPUT
    ============================================================ */
@@ -436,7 +458,7 @@ html[data-vyom-theme] [data-testid="stChatInput"] button svg {
 }
 
 /* ============================================================
-   APP TITLE (keep last so it wins)
+   APP TITLE (keep last so it wins) — used only if no logo file exists
    ============================================================ */
 
 .stApp .st-key-app_title h1 {
