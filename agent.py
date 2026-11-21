@@ -2,7 +2,7 @@ import base64
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import logging
 import os
@@ -104,6 +104,10 @@ DEFAULT_BIFROST_MODELS = (
 
 COOLDOWN_SECONDS = 60
 
+# "low" makes gpt-oss models start answering much faster.
+# Set REASONING_EFFORT=medium on Render to undo this.
+REASONING_EFFORT = os.getenv("REASONING_EFFORT", "low").strip().lower()
+
 NO_TOOLS_NOTE = (
     " You have no tools or functions. Never attempt a tool call; "
     "reply with plain text only."
@@ -165,6 +169,8 @@ def transcribe_audio(audio_file: tuple[str, bytes, str]) -> str:
             response_format="json",
         )
     except OpenAIError as error:
+        if _is_limit_error(error):
+            raise _limit_error([error]) from error
         raise RuntimeError(
             "Audio transcription failed. Please try again or type your message."
         ) from error
@@ -281,6 +287,17 @@ def _client_for(target: _Target) -> OpenAI:
     )
 
 
+def _extra_options(target: _Target) -> dict[str, Any]:
+    """Extra request options; only direct Groq gpt-oss models get them."""
+    if (
+        REASONING_EFFORT in {"low", "medium", "high"}
+        and target.label.startswith("groq:")
+        and "gpt-oss" in target.model
+    ):
+        return {"extra_body": {"reasoning_effort": REASONING_EFFORT}}
+    return {}
+
+
 def _no_tool_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
     if not messages:
         return [{"role": "system", "content": NO_TOOLS_NOTE.strip()}]
@@ -300,11 +317,110 @@ def _should_retry_same_target(error: Exception) -> bool:
     return _is_transient_provider_error(error) and not _is_rate_limit_error(error)
 
 
+class LimitReached(RuntimeError):
+    """Raised when a provider's usage limit is used up."""
+
+    def __init__(self, message: str, retry_after: float | None = None):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+def _is_limit_error(error: Exception) -> bool:
+    status_code = getattr(error, "status_code", None)
+    text = str(error).casefold()
+    return (
+        status_code in (429, 402)
+        or "insufficient_quota" in text
+        or "exceeded your current quota" in text
+        or "resource_exhausted" in text
+    )
+
+
+def _parse_wait_seconds(text: str) -> float | None:
+    """Read waits like 'try again in 7m12.9s' or 'retry in 34s'."""
+    match = re.search(
+        r"(?:try again|retry)[^0-9]{0,12}((?:\d+(?:\.\d+)?\s*(?:h|m(?!s)|s)\s*){1,3})",
+        text,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+
+    total = 0.0
+    for value, unit in re.findall(
+        r"(\d+(?:\.\d+)?)\s*(h|m(?!s)|s)", match.group(1), re.IGNORECASE
+    ):
+        total += float(value) * {"h": 3600, "m": 60, "s": 1}[unit.lower()]
+
+    return total or None
+
+
+def _error_wait_seconds(error: Exception) -> float | None:
+    response = getattr(error, "response", None)
+    headers = getattr(response, "headers", None)
+    retry_after = None
+    try:
+        retry_after = headers.get("retry-after") if headers is not None else None
+    except AttributeError:
+        retry_after = None
+
+    try:
+        if retry_after is not None:
+            return float(retry_after)
+    except (TypeError, ValueError):
+        pass
+
+    return _parse_wait_seconds(str(error))
+
+
+def _describe_wait(seconds: float) -> str:
+    seconds = max(1, int(round(seconds)))
+    if seconds < 60:
+        return f"{seconds} second{'s' if seconds != 1 else ''}"
+
+    minutes = (seconds + 59) // 60
+    if minutes < 60:
+        return f"{minutes} minute{'s' if minutes != 1 else ''}"
+
+    hours, minutes = divmod(minutes, 60)
+    text = f"{hours} hour{'s' if hours != 1 else ''}"
+    if minutes:
+        text += f" {minutes} minute{'s' if minutes != 1 else ''}"
+    return text
+
+
+def _limit_error(failures: list[Exception]) -> LimitReached:
+    waits = [wait for wait in (_error_wait_seconds(e) for e in failures) if wait]
+    if not waits:
+        return LimitReached(
+            "Your limit is over for now. Please come back in a few minutes."
+        )
+
+    retry_after = min(waits)
+    message = (
+        "Your limit is over for now. "
+        f"Please come back in about {_describe_wait(retry_after)}"
+    )
+    if retry_after >= 120:
+        resume = datetime.now(ZoneInfo("Asia/Kolkata")) + timedelta(seconds=retry_after)
+        message += f" (around {resume.strftime('%I:%M %p').lstrip('0')} IST)"
+    return LimitReached(message + ".", retry_after)
+
+
 def _final_error(failures: list[Exception]) -> RuntimeError:
-    if failures and all(_is_rate_limit_error(error) for error in failures):
+    if failures and all(_is_limit_error(error) for error in failures):
+        return _limit_error(failures)
+
+    codes = []
+    for error in failures:
+        status = getattr(error, "status_code", None)
+        label = str(status) if status else type(error).__name__
+        if label not in codes:
+            codes.append(label)
+
+    if codes:
         return RuntimeError(
-            "The AI service is rate-limited right now. "
-            "Please wait a moment and try again."
+            f"{LLM_UNAVAILABLE_MESSAGE} (error codes: {', '.join(codes)})"
         )
     return RuntimeError(LLM_UNAVAILABLE_MESSAGE)
 
@@ -334,9 +450,10 @@ def call_llm(
         client = _client_for(target)
         try:
             return _provider_request(
-                lambda c=client, m=target.model: c.chat.completions.create(
+                lambda c=client, m=target.model, x=_extra_options(target): c.chat.completions.create(
                     model=m,
                     messages=prepared_messages,
+                    **x,
                 )
             )
         except (OpenAIError, TimeoutError) as error:
@@ -351,6 +468,7 @@ def _stream_provider(
     messages: list[dict[str, str]],
     model: str,
     cancel_event: threading.Event | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> Iterator[str]:
     for attempt in range(MAX_PROVIDER_RETRIES + 1):
         yielded = False
@@ -361,6 +479,7 @@ def _stream_provider(
                 model=model,
                 messages=messages,
                 stream=True,
+                **(extra or {}),
             )
 
             for event in stream:
@@ -409,6 +528,7 @@ def stream_llm(
                 prepared_messages,
                 target.model,
                 cancel_event,
+                _extra_options(target),
             )
             return
         except GenerationStopped:
@@ -937,6 +1057,11 @@ def search_web(
             if isinstance(error, (InvalidAPIKeyError, MissingAPIKeyError)):
                 raise RuntimeError(
                     "Tavily rejected TAVILY_API_KEY. Check that the key is valid."
+                ) from error
+            if isinstance(error, UsageLimitExceededError):
+                raise LimitReached(
+                    "The web-search limit is over for now. "
+                    "Please come back a little later."
                 ) from error
             return {"_search_error": str(error)}
 
