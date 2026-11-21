@@ -234,6 +234,23 @@ def _background_css() -> str:
 # Feedback
 # ---------------------------------------------------------------------------
 
+def _logo_path():
+    """Find logo.png in static/, assets/, images/ or next to app.py."""
+    for folder in ("static", "assets", "images", ""):
+        path = APP_DIR / folder / "logo.png"
+        if path.is_file():
+            return path
+    return None
+
+
+@st.cache_resource(show_spinner=False)
+def _logo_data_uri():
+    path = _logo_path()
+    if path is None:
+        return None
+    return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode("ascii")
+
+
 @st.cache_resource
 def _feedback_store():
     return {"like": {}, "dislike": {}}
@@ -1304,6 +1321,8 @@ _INTRO_HTML = (
     "font-size:clamp(2.6rem,10vw,3.6rem);letter-spacing:.18em;text-transform:uppercase;margin:0 0 .4rem;"
     "background:linear-gradient(100deg,#e77abf,#9b83e8 55%,#53b9d4);-webkit-background-clip:text;"
     "background-clip:text;color:transparent;animation:vi-rise .8s ease both;}"
+    "#vyom-intro .vi-logo{display:block;width:min(13rem,58vw);height:auto;margin:0 auto 1rem;"
+    "box-shadow:0 10px 40px rgba(72,182,206,.25);border-radius:1.4rem;animation:vi-rise .8s ease both;}"
     "#vyom-intro .vi-sub{color:var(--vyom-dim,#aab5c9);margin:0 0 1.6rem;animation:vi-rise .8s .1s ease both;}"
     "#vyom-intro .vi-chat{text-align:left;display:grid;gap:.7rem;margin-bottom:1.6rem;}"
     "#vyom-intro .vi-me{justify-self:end;max-width:80%;padding:.6rem .9rem;border:1px solid var(--vyom-border,rgba(255,255,255,.14));"
@@ -1334,8 +1353,7 @@ _INTRO_HTML = (
     "#vyom-intro{animation-duration:.01s!important;animation-delay:.6s!important;}}"
     "</style>"
     '<div id="vyom-intro" aria-hidden="true"><div class="vi-box">'
-    '<div class="vyom-search-icon"></div>'
-    '<div class="vi-title">Vyom</div>'
+    "<!--LOGO-->"
     '<p class="vi-sub">Your AI research assistant</p>'
     '<div class="vi-status"><span class="vi-dots"><span></span><span></span><span></span></span>'
     "<span>Getting things ready…</span></div>"
@@ -1343,10 +1361,22 @@ _INTRO_HTML = (
     "</div></div>"
 )
 
+def _intro_html():
+    uri = _logo_data_uri()
+    if uri:
+        block = f'<img class="vi-logo" src="{uri}" alt="VYOM logo">'
+    else:
+        block = (
+            '<div class="vyom-search-icon"></div>'
+            '<div class="vi-title">Vyom</div>'
+        )
+    return _INTRO_HTML.replace("<!--LOGO-->", block)
+
+
 if "intro_done" not in st.session_state:
     st.session_state["intro_done"] = True
     if st.query_params.get("from") != "splash":
-        st.markdown(_INTRO_HTML, unsafe_allow_html=True)
+        st.markdown(_intro_html(), unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
 # Session initialization
@@ -1422,20 +1452,29 @@ if messages:
     _render_conversation(messages)
 else:
     with st.container(key="assistant_msg_greeting"):
-        greeting_column, flower_column = st.columns([0.88, 0.12])
+        _logo_file = _logo_path()
 
-        with greeting_column:
+        if _logo_file is not None:
+            st.image(str(_logo_file), width=150)
             st.markdown(
                 f'<div class="greeting-text">{html.escape(st.session_state["greeting"])}</div>',
                 unsafe_allow_html=True,
             )
+        else:
+            greeting_column, flower_column = st.columns([0.88, 0.12])
 
-        with flower_column:
-            st.markdown(
-                '<div class="vyom-search-icon" role="img" '
-                'aria-label="Search"></div>',
-                unsafe_allow_html=True,
-            )
+            with greeting_column:
+                st.markdown(
+                    f'<div class="greeting-text">{html.escape(st.session_state["greeting"])}</div>',
+                    unsafe_allow_html=True,
+                )
+
+            with flower_column:
+                st.markdown(
+                    '<div class="vyom-search-icon" role="img" '
+                    'aria-label="Search"></div>',
+                    unsafe_allow_html=True,
+                )
 
 # ---------------------------------------------------------------------------
 # Global script: scroll-down button, pause button, copy + native share
