@@ -25,6 +25,12 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 from streamlit.errors import StreamlitAPIException, StreamlitSecretNotFoundError
 
 from agent import run_research_stream, transcribe_audio
+
+try:
+    from agent import LimitReached
+except ImportError:  # older agent.py without the limit message
+    class LimitReached(Exception):
+        pass
 from attachments import run_attachment_stream
 import patches  # noqa: F401
 
@@ -598,7 +604,7 @@ def _render_copy_button(report):
 
     document = f"""<!doctype html><html><head><meta charset="utf-8"><style>
 html,body{{margin:0;padding:0;background:transparent;overflow:hidden}}
-body{{display:flex;align-items:center;justify-content:center;height:34px}}
+body{{display:flex;align-items:center;justify-content:flex-start;height:34px}}
 button{{box-sizing:border-box;width:32px;height:32px;border-radius:50%;border:1px solid {border};
 background:transparent;color:{fg};cursor:pointer;padding:0;display:flex;align-items:center;
 justify-content:center;transition:background .2s,border-color .2s,color .2s}}
@@ -947,7 +953,7 @@ html,body,.stApp,[data-testid="stAppViewContainer"],
     width:100%;
     max-width:none;
     margin-inline:auto;
-    padding:3.5rem 1.25rem 2rem;
+    padding:3.5rem 1.25rem 9rem;
 }
 
 [data-testid="stMarkdownContainer"] {
@@ -1240,7 +1246,7 @@ section[data-testid="stSidebar"] div[data-testid="stButton"]>button>div {
 
 @media(max-width:640px) {
     [data-testid="stMainBlockContainer"],
-    section.main>div {padding:3.5rem .5rem 5rem;}
+    section.main>div {padding:3.5rem .5rem 9rem;}
 
     div[data-testid="stBottomBlockContainer"] {padding-inline:.5rem!important;}
 
@@ -1811,11 +1817,14 @@ if has_input:
                 loader.empty()
                 update_progress("The response could not be completed.")
 
-                assistant_message["error"] = (
-                    "The request could not be completed. "
-                    "Check the error details below."
-                )
-                assistant_message["error_detail"] = str(error)
+                if isinstance(error, LimitReached):
+                    assistant_message["error"] = str(error)
+                else:
+                    assistant_message["error"] = (
+                        "The request could not be completed. "
+                        "Check the error details below."
+                    )
+                    assistant_message["error_detail"] = str(error)
 
             else:
                 loader_state["active"] = False
