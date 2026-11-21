@@ -1001,7 +1001,7 @@ st.set_page_config(
 
 BASE_CSS = """
 <style>
-@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,600;1,700&family=DM+Sans:wght@400;500;600;700&display=swap");
+@import url("https://googleapis.com");
 
 :root {
     --fs-body:1rem;
@@ -1119,6 +1119,16 @@ div[class*="st-key-assistant_msg_"] {
     font-size:clamp(2rem,5vw,var(--fs-greeting));
     font-weight:600;
     line-height:1.2;
+}
+
+/* Centers the greeting and icon horizontally and moves them to the vertical middle */
+div:has(> .greeting-text) {
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    text-align:center;
+    margin-top:28vh;
+    width:100%;
 }
 
 .jasmine-flower {
@@ -1331,6 +1341,7 @@ section[data-testid="stSidebar"] div[data-testid="stButton"]>button>div {
 }
 </style>
 """
+
 
 st.markdown(BASE_CSS, unsafe_allow_html=True)
 
