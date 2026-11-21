@@ -235,9 +235,9 @@ def _background_css() -> str:
 # ---------------------------------------------------------------------------
 
 def _logo_path():
-    """Find logo.jpg in static/, assets/, images/ or next to app.py."""
+    """Find logo.png in static/, assets/, images/ or next to app.py."""
     for folder in ("static", "assets", "images", ""):
-        path = APP_DIR / folder / "logo.jpg"
+        path = APP_DIR / folder / "logo.png"
         if path.is_file():
             return path
     return None
@@ -1394,7 +1394,11 @@ _init_chats()
 messages = _active_messages()
 
 with st.container(key="app_title"):
-    st.title("VYOM")
+    _header_logo = _logo_path()
+    if _header_logo is not None:
+        st.image(str(_header_logo), width=42)
+    else:
+        st.title("VYOM")
 
 # ---------------------------------------------------------------------------
 # Sidebar
@@ -1452,29 +1456,13 @@ if messages:
     _render_conversation(messages)
 else:
     with st.container(key="assistant_msg_greeting"):
-        _logo_file = _logo_path()
-
-        if _logo_file is not None:
-            st.image(str(_logo_file), width=150)
-            st.markdown(
-                f'<div class="greeting-text">{html.escape(st.session_state["greeting"])}</div>',
-                unsafe_allow_html=True,
-            )
-        else:
-            greeting_column, flower_column = st.columns([0.88, 0.12])
-
-            with greeting_column:
-                st.markdown(
-                    f'<div class="greeting-text">{html.escape(st.session_state["greeting"])}</div>',
-                    unsafe_allow_html=True,
-                )
-
-            with flower_column:
-                st.markdown(
-                    '<div class="vyom-search-icon" role="img" '
-                    'aria-label="Search"></div>',
-                    unsafe_allow_html=True,
-                )
+        st.markdown(
+            '<div class="vyom-greeting-row">'
+            '<div class="vyom-search-icon" role="img" aria-label="Search"></div>'
+            f'<div class="greeting-text">{html.escape(st.session_state["greeting"])}</div>'
+            "</div>",
+            unsafe_allow_html=True,
+        )
 
 # ---------------------------------------------------------------------------
 # Global script: scroll-down button, pause button, copy + native share
