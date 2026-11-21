@@ -25,7 +25,7 @@ ping, but if the first load is slow, give it a few seconds.
 - **Voice input:** tap the microphone in the composer; the recording is
   transcribed with Groq and handled like typed text.
 - **File attachments:** attach PDF, image, text, Markdown or CSV files and ask
-  questions about them.
+  questions about them.E
 - **Reply controls:** like / dislike, regenerate, copy, share (WhatsApp,
   Telegram, X, Facebook, email, plain text) and download as PDF. Research
   reports also download as Markdown.
